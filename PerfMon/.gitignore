@@ -45,4 +45,8 @@ $RECYCLE.BIN/
 Network Trash Folder
 Temporary Items
 .apdisk
-*.suo
+*.tlog
+x64/Debug/vc140.pdb
+*.obj
+x64/Debug/PerfMon.log
+*.log
