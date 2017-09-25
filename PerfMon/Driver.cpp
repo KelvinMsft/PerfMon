@@ -85,7 +85,9 @@ extern "C"
 		PMU_DEBUG_INFO_LN_EX("SupportedNumOfPMCs:%-30d"	,g_EnvironmentInfo.SupportedNumOfPMCs		);
 		PMU_DEBUG_INFO_LN_EX("SupporteWidthPerPMCs:%-30d"	,g_EnvironmentInfo.SupporteWidthPerPMCs	);
 		PMU_DEBUG_INFO_LN_EX("SupportedPerfEvents:%-30d"	,g_EnvironmentInfo.SupportedPerfEvents		);
-		PMU_DEBUG_INFO_LN_EX("IsSupportPebs:%-30d"		,g_EnvironmentInfo.IsSupportPebs				);
+		PMU_DEBUG_INFO_LN_EX("IsSupportPebs:%-30d"		,g_EnvironmentInfo.IsSupportPebs				); 
+		PMU_DEBUG_INFO_LN_EX("IsSupportEmon:%-30d", g_EnvironmentInfo.IsSupportEmon);
+		 
 		PMU_DEBUG_INFO_LN_EX("-----------------------------------------------------------------------");
 
 		DrvObj->DriverUnload = DrvUnload;

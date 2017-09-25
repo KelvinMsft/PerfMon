@@ -3,8 +3,15 @@
 #include "Common.h"
 #include "Log.h"
 #include <intrin.h>
-#define PERIOD 100003
+#define PERIOD 1000003
 
+////////////////////////////////////////////////////////////////////
+//// Types
+////  
+
+
+#define PEBS_BUFFER_SIZE	(64 * 1024) /* PEBS buffer size */
+#define OUT_BUFFER_SIZE		(64 * 1024) /* must be multiple of 4k */
 
 //--------------------------------------------------------------//
 NTSTATUS PMUEnvironmentCheck(
@@ -53,6 +60,7 @@ NTSTATUS PMUEnvironmentCheck(
 	Info->SupportedAnyThread = (version == 3) ? 1 : 0; 
 	Info->SupportedPerfEvents = SupportedPerfEvents;
 	Info->IsSupportPebs = (!MiscEnable.fields.PEBSUnavaiable);
+	Info->IsSupportEmon = (MiscEnable.fields.PerfMonAvaliable);
 
 	END_DO_WHILE
 
@@ -90,64 +98,73 @@ static bool check_cpu(void)
 		return false;
 	}
 
-	switch (model) {
-	case 58: /* IvyBridge */
-	case 63: /* Haswell_EP */
-	case 69: /* Haswell_ULT */
-	case 94: /* Skylake */
-		g_Event = 0xc2; /* UOPS_RETIRED.ALL */
-		g_Mask = 0x1;
-		break;
+	switch (model) 
+	{
+		case 58: /* IvyBridge */
+		case 60:
+		case 63: /* Haswell_EP */
+		case 69: /* Haswell_ULT */
+		case 94: /* Skylake */
+			g_Event = 0xc4; /* UOPS_RETIRED.ALL */
+			g_Mask = 0x40;
+			break;
 
-	case 55: /* Bay Trail */
-	case 76: /* Airmont */
-	case 77: /* Avoton */
-		g_Event = 0x0c5; /* BR_MISP_RETIRED.ALL_BRANCHES */
-		break;
+		case 55: /* Bay Trail */
+		case 76: /* Airmont */
+		case 77: /* Avoton */
+			g_Event = 0x0c5; /* BR_MISP_RETIRED.ALL_BRANCHES */
+			break;
 
-	default:
-		PMU_DEBUG_INFO_LN_EX("Unknown CPU model %d\n", model);
-		return false;
+		default:
+			PMU_DEBUG_INFO_LN_EX("Unknown CPU model %d\n", model);
+			return false;
 	}
 
 	/* Check if we support arch perfmon */
-	if (max >= 0xa) {
+	if (max >= 0xa) 
+	{
 		__cpuid(cpu_info, 0xA);
-		if ((cpu_info[0] & 0xff) < 1) {
+		if ((cpu_info[0] & 0xff) < 1) 
+		{
 			PMU_DEBUG_INFO_LN_EX("No arch perfmon support\n");
 			return false;
 		}
-		if (((cpu_info[0] >> 8) & 0xff) < 1) {
+
+		if (((cpu_info[0] >> 8) & 0xff) < 1) 
+		{
 			PMU_DEBUG_INFO_LN_EX("No generic counters\n");
 			return false;
 		}
 	}
-	else {
+	else 
+	{
 		PMU_DEBUG_INFO_LN_EX("No arch perfmon support\n");
 		return false;
 	}
 
 	/* check if we support DS */
-	if (!(feat2 & (1 << 21))) {
+	if (!(feat2 & (1 << 21))) 
+	{
 		PMU_DEBUG_INFO_LN_EX("No debug store support\n");
 		return false;
 	}
 	
 	/* check perf capability */
 
-	if (feat1 & (1 << 15)) {
+	if (feat1 & (1 << 15)) 
+	{
 		ULONG64 cap;
 
 		cap = __readmsr(static_cast<ULONG>(Msr::Ia32PerfCaps));
 		switch ((cap >> 8) & 0xf) {
 		case 1:
-			pebs_record_size = 1; //sizeof(struct pebs_v1);
+			pebs_record_size = sizeof(struct pebs_v1);
 			break;
 		case 2:
-			pebs_record_size = 2;// sizeof(struct pebs_v2);
+			pebs_record_size = sizeof(struct pebs_v2);
 			break;
 		case 3:
-			pebs_record_size = 3;// sizeof(struct pebs_v3);
+			pebs_record_size = sizeof(struct pebs_v3);
 			break;
 		default:
 			PMU_DEBUG_INFO_LN_EX("Unsupported PEBS format\n");
@@ -155,15 +172,55 @@ static bool check_cpu(void)
 		}
 		/* Could check PEBS_TRAP */
 	}
-	else {
+	else 
+	{
 		PMU_DEBUG_INFO_LN_EX("No PERF_CAPABILITIES support\n");
 		return false;
 	}
 	
-	PMU_DEBUG_INFO_LN_EX("Supported CPU : %x %x pebs_record_size: %x ", g_Mask, g_Event, pebs_record_size);
-
+	PMU_DEBUG_INFO_LN_EX("Supported CPU : %x %x pebs_record_size: %x ", g_Mask, g_Event, pebs_record_size); 
 
 	return true;
+}
+
+void* g_out = NULL;
+debug_store g_ds[8] = { 0 } ;
+//--------------------------------------------------------------//
+/* Allocate DS and PEBS buffer */
+static debug_store* AllocateResource(void)
+{
+	struct debug_store *ds = NULL;
+	unsigned num_pebs = 0;
+	ds = &g_ds[KeGetCurrentProcessorNumber()];
+	/* Set up buffer */
+	ds->pebs_base = (ULONG64)ExAllocatePoolWithTag(NonPagedPool, PEBS_BUFFER_SIZE, 'kNEL');
+	if (!ds->pebs_base) {
+		PMU_DEBUG_INFO_LN_EX("Cannot allocate PEBS buffer\n");
+		ExFreePool(ds);
+		ds = NULL;
+		return NULL;
+	}
+
+	memset((void *)ds->pebs_base, 0, PEBS_BUFFER_SIZE);
+	num_pebs = PEBS_BUFFER_SIZE / pebs_record_size;
+	ds->pebs_index = ds->pebs_base;
+	ds->pebs_max = ds->pebs_base + (num_pebs - 1) * pebs_record_size + 1;
+	ds->pebs_thresh = ds->pebs_base + (num_pebs - num_pebs / 10) * pebs_record_size;
+	ds->pebs_reset[0] = 0-(ULONG64)PERIOD; 
+	 
+	return ds;
+}
+
+static void* AllocateOutBuffer(void)
+{
+	void *outbu_base = NULL;
+
+	outbu_base = ExAllocatePoolWithTag(NonPagedPool, OUT_BUFFER_SIZE, 'kNEL');
+	if (!outbu_base) {
+		PMU_DEBUG_INFO_LN_EX("Cannot allocate out buffer\n"); 
+	}
+	  
+	return outbu_base;
 }
 
 
@@ -172,11 +229,22 @@ NTSTATUS PMUInitiailization(
 	_In_ PVOID info
 )
 {
+	START_DO_WHILE
+
 	PMUINFO* Info = (PMUINFO*)info;
-	if (!Info)
+	if (!Info || !check_cpu())
 	{
 		return STATUS_UNSUCCESSFUL;
 	}
+	AllocateResource();
+
+	g_out = AllocateOutBuffer();
+	if (!g_out)
+	{ 
+		PMU_DEBUG_INFO_LN_EX("AllocateResource Error : %p", g_ds);
+		break;
+	}
+
 
 	switch (Info->SupportedVersion)
 	{
@@ -186,48 +254,40 @@ NTSTATUS PMUInitiailization(
 		break;
 	case 2:
 		break;
-	case 3: 
-	/*	Ctrl.fields.EnableCTR0 = true;
-		Ctrl.fields.EnableCTR1 = true;
-		Ctrl.fields.EnableCTR2 = true;
+	case 3:  
+		__writemsr(static_cast<ULONG>(Msr::Ia32DsArea), (ULONG64)&g_ds[KeGetCurrentProcessorNumber()]);
+		 
+		MSR_IA32_PERF_GLOBAL_CTRL_VERSION2 Ctrl = { 0 };
+		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);  
+		__writemsr(static_cast<ULONG>(Msr::Ia32PMCx),   (ULONG)0xFFFFFFFE); 
+
+		MSR_IA32_PERFEVTSELX_VERSION3 PerfEvtSelx = { 0 };
+		PerfEvtSelx.fields.Usr = false;
+		PerfEvtSelx.fields.Os = true;
+		PerfEvtSelx.fields.E = false;
+		PerfEvtSelx.fields.Int = true;
+		PerfEvtSelx.fields.CounterMask = 0;
+		PerfEvtSelx.fields.En = true;
+		PerfEvtSelx.fields.AnyThread = false;
+		PerfEvtSelx.fields.EventSelect = g_Event;
+		PerfEvtSelx.fields.UnitMask = 0;
+		PerfEvtSelx.fields.Inv = false;
+		PerfEvtSelx.fields.Pc = false;
+		__writemsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx), PerfEvtSelx.all);
+
+		MSR_IA32_PEBS_ENABLE Pebs_Enable = { 0 };
+		Pebs_Enable.fields.EnablePmc0 = true;
+		__writemsr(static_cast<ULONG>(Msr::Ia32PebsEnable), Pebs_Enable.all);
+
 		Ctrl.fields.EnablePmc0 = true;
-		Ctrl.fields.EnablePmc1 = true; 
-		*/
-
-		if (check_cpu())
-		{
-			MSR_IA32_PERF_GLOBAL_CTRL_VERSION2 Ctrl = { 0 };
-			__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
-
-			__writemsr(static_cast<ULONG>(Msr::Ia32PMCx), (ULONG64)-PERIOD);
-
-			MSR_IA32_PERFEVTSELX_VERSION3 PerfEvtSelx = { 0 };
-			PerfEvtSelx.fields.Usr = true;
-			PerfEvtSelx.fields.Os = true;
-			PerfEvtSelx.fields.E = false;
-			PerfEvtSelx.fields.Int = true;
-			PerfEvtSelx.fields.CounterMask = 0;
-			PerfEvtSelx.fields.En = true;
-			PerfEvtSelx.fields.AnyThread = false;
-			PerfEvtSelx.fields.EventSelect = g_Event;
-			PerfEvtSelx.fields.UnitMask = g_Mask;
-			PerfEvtSelx.fields.Inv = false;
-			PerfEvtSelx.fields.Pc = false;
-			__writemsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx), PerfEvtSelx.all);
-
-		/*	MSR_IA32_PEBS_ENABLE Pebs_Enable = { 0 };
-			Pebs_Enable.fields.EnablePmc0 = true;
-			__writemsr(static_cast<ULONG>(Msr::Ia32PebsEnable), Pebs_Enable.all);
-
-			Ctrl.fields.EnablePmc0 = true;
-			__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
-	*/
-			PMU_DEBUG_INFO_LN_EX("Id: %d Done....", KeGetCurrentProcessorNumber());
-
-		}
-
+		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
+	
+		PMU_DEBUG_INFO_LN_EX("Id: %x %d Done....", __readmsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx)), KeGetCurrentProcessorNumber());
+	
 		break;
 	}
+
+	END_DO_WHILE
 	return STATUS_SUCCESS;
 }
 

@@ -2,7 +2,7 @@
 
 #define MSR_IA32_PERF_GLOBAL_STATUS		0x0000038E
 #define MSR_IA32_APIC_BASE				0x0000001B			// The APIC base address register
-#define MSR_IA32_PERF_GLOBAL_OVF_CTRL	0x00000390			// Aka IA32_GLOBAL_STATUS_RESET
+
 #define MSR_IA32_RTIT_OUTPUT_BASE		0x00000560
 #define MSR_IA32_RTIT_OUTPUT_MASK_PTRS	0x00000561
 #define MSR_IA32_RTIT_CTL				0x00000570
@@ -263,6 +263,50 @@ union MSR_IA32_PERF_CAPABILITIES
 	ULONG64 all;
 };
 static_assert(sizeof(MSR_IA32_PERF_CAPABILITIES) == 8, "Size check");
+
+
+union MSR_IA32_PERF_GLOBAL_OVF_CTL
+{
+	struct
+	{
+		ULONG64 Ia32Pmc0Ovf : 1;
+		ULONG64 Ia32Pmc1Ovf : 1;
+		ULONG64 Reserved : 30;
+		ULONG64 Ia32FixedCtr0Ovf : 1;
+		ULONG64 Ia32FixedCtr1Ovf : 1;
+		ULONG64 Ia32FixedCtr2Ovf : 1;
+		ULONG64 Reserved1 : 27;
+		ULONG64 ClrCondChgd : 1;		
+		ULONG64 ClrOvfDSBuffer : 1; 
+	}fields;
+	ULONG64 all;
+};
+static_assert(sizeof(MSR_IA32_PERF_GLOBAL_OVF_CTL) == 8, "Size check");
+
+union MSR_IA32_PERF_GLOBAL_OVF_CTRL
+{
+	struct
+	{
+		ULONG64 OvfPmc0 : 1;			/// <[0]
+		ULONG64 OvfPmc1 : 1;			/// <[1]
+		ULONG64 OvfPmc2 : 1;			/// <[2]
+		ULONG64 OvfPmcn : 1;			/// <[3]
+		ULONG64 Reserved : 28;			/// <[n:4] , n If CPUID.0AH: EAX[15:8] > n
+		ULONG64 OvfFixedCtr0 : 1;		/// <[32]
+		ULONG64 OvfFixedCtr1 : 1;		/// <[33]
+		ULONG64 OvfFixedCtr2 : 1;		/// <[34]
+		ULONG64 Reserved2 : 20;			/// <[54:35]
+		ULONG64 TraceToPaPmi : 1;		/// <[55]
+		ULONG64 Reserved3 : 5;			/// <[60:56]
+		ULONG64  OvfUnCore : 1;			/// <[61]
+		ULONG64  OvfBuf : 1;			/// <[62]
+		ULONG64  CondChgd : 1;			/// <[63]
+	}fields;
+	ULONG64 all;
+}; 
+static_assert(sizeof(MSR_IA32_PERF_GLOBAL_OVF_CTRL) == 8, "Size check");
+
+
 /// See: MODEL-SPECIFIC REGISTERS (MSRS)
 enum class Msr : unsigned int {
 	Ia32ApicBase = 0x01B,
@@ -287,7 +331,8 @@ enum class Msr : unsigned int {
 
 	//PMU PEBS Related
 	Ia32MiscEnable = 0x1A0,
-	Ia32PebsEnable = 0x381,
+	Ia32PebsEnable = 0x3F1,
+	Ia32DsArea = 0x600,
 
 	Ia32VmxBasic = 0x480,
 	Ia32VmxPinbasedCtls = 0x481,
@@ -318,4 +363,18 @@ enum class Msr : unsigned int {
 	Ia32GsBase = 0xC0000101,
 	Ia32KernelGsBase = 0xC0000102,
 	Ia32TscAux = 0xC0000103,
+	 
+};
+
+
+enum class CpuMircoArchModel : unsigned int
+{
+	SandyBridge = 0x2A,
+	SandyBridge_E = 0x2D,
+	IvyBridge = 0x3A,
+
+	Arrandale = 0x25,
+	Gulftown  = 0x2C,
+	Westmere_Ex = 0x2F,
+
 };

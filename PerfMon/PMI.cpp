@@ -2,7 +2,8 @@
 #include "PMI.h"
 #include "Apic.h"
 #include "Common.h"
-
+#include "Log.h"
+#include "x86.h"
 //////////////////////////////////////////////////////////////////
 ////	Types
 ////	 
@@ -38,61 +39,72 @@ typedef struct _DRIVER_GLOBAL_DATA {
 
 
 DRIVER_GLOBAL_DATA g_pDrvData;
-
+extern void* g_out ;
+extern debug_store g_ds[8] ;
+extern ULONG pebs_record_size;
 //--------------------------------------------------------------//
 // The PMI LVT handler routine (Warning! This should run at very high IRQL)
 VOID IntelPtPmiHandler(PKTRAP_FRAME pTrapFrame)
 {
+ 	struct pebs_v1 *pebs, *end;
+
 	//	PKDPC pProcDpc = NULL;									// This processor DPC
 	MSR_IA32_PERF_GLOBAL_STATUS_DESC pmiDesc = { 0 };		// The PMI Interrupt descriptor
+	MSR_IA32_PERF_GLOBAL_OVF_CTRL OvfCtrl = { 0 };
 	LVT_Entry perfMonDesc = { 0 };							// The LVT Performance Monitoring register
+
 	PULONG lpdwApicBase = g_pDrvData.lpApicBase;			// The LVT Apic I/O space base address (if not in x2Apic mode)
-	DWORD dwCurCpu = 0;
-	DbgPrintEx(0, 0, "[PROC Id: %d] IntelPtPmiHandler", KeGetCurrentProcessorNumber());
-	//PER_PROCESSOR_PT_DATA * pCurCpuData = NULL;				// The Per-Processor data structure
-	//PT_BUFFER_DESCRIPTOR * ptBuffDesc = NULL;				// The PT Buffer descriptor
-	UNREFERENCED_PARAMETER(pTrapFrame);
+//	DWORD dwCurCpu = 0;
 
-	ASSERT(KeGetCurrentIrql() > DISPATCH_LEVEL);
+	PMU_DEBUG_INFO_LN_EX("[PROC Id: %d] IntelPtPmiHandler %p ", KeGetCurrentProcessorNumber(), pTrapFrame->Rip);
+ 
+	MSR_IA32_PERF_GLOBAL_CTRL_VERSION2 Ctrl = { 0 };
+	__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);  
 
-	dwCurCpu = KeGetCurrentProcessorNumber();
+	OvfCtrl.fields.OvfBuf = true;
+	__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalOvfCtrl), OvfCtrl.all);
 
-	// Check if the interrupt is mine
-	pmiDesc.All = __readmsr(MSR_IA32_PERF_GLOBAL_STATUS);
-	if (pmiDesc.Fields.TraceToPAPMI == 0)
-		return;
+	__writemsr(static_cast<ULONG>(Msr::Ia32PMCx), (ULONG)0xFFFFFFFE);
+ 
+	debug_store* ds_area = (debug_store*)__readmsr(static_cast<ULONG>(Msr::Ia32DsArea));
+	end = (struct pebs_v1 *)ds_area->pebs_index;
+	for (pebs = (struct pebs_v1 *)ds_area->pebs_base; pebs < end ; pebs = (struct pebs_v1 *)((char *)pebs + pebs_record_size)) {
+		u64 ip = pebs->ip;
+		if (pebs_record_size >= sizeof(struct pebs_v2))
+			ip = ((struct pebs_v2 *)pebs)->eventing_ip;
 
-	/*
-	// Check the Intel PT status
-	MSR_RTIT_STATUS_DESC traceStatusDesc = { 0 };
-	traceStatusDesc.All = __readmsr(MSR_IA32_RTIT_STATUS);
-	if (traceStatusDesc.Fields.Error)
-	DrvDbgPrint("[" DRV_NAME "] Warning: Intel PT Pmi has raised, but the PT Status register indicates an error!\r\n");
-
-	if (ptBuffDesc && ptBuffDesc->bDefaultPmiSet) {
-	// Queue a DPC only if the Default PMI handler is set
-	ptBuffDesc->bBuffIsFull = TRUE;
-
-	// The IRQL is too high so we use DPC
-	pProcDpc = (PKDPC)ExAllocatePoolWithTag(NonPagedPool, sizeof(KDPC), MEMTAG);
-	KeInitializeDpc(pProcDpc, IntelPmiDpc, NULL);
-	KeSetTargetProcessorDpc(pProcDpc, (CCHAR)dwCurCpu);
-	KeInsertQueueDpc(pProcDpc, (LPVOID)dwCurCpu, NULL);
+		PMU_DEBUG_INFO_LN_EX("ip: %p sp: %p", pebs->ip, pebs->sp);
 	}
+	 
+	 
+	PMU_DEBUG_INFO_LN_EX("Finish dumping ");
 
-	MSR_IA32_PERF_GLOBAL_OVF_CTRL_DESC globalResetMsrDesc = { 0 };
-	// Set the PMI Reset: Once the ToPA PMI handler has serviced the relevant buffer, writing 1 to bit 55 of the MSR at 390H
-	// (IA32_GLOBAL_STATUS_RESET)clears IA32_PERF_GLOBAL_STATUS.TraceToPAPMI.
-	globalResetMsrDesc.Fields.ClrTraceToPA_PMI = 1;
-	__writemsr(MSR_IA32_PERF_GLOBAL_OVF_CTRL, globalResetMsrDesc.All);
+	ds_area->pebs_index = ds_area->pebs_base;
 
-	// Call the External PMI handler (if any)
-	if (g_pDrvData->pCustomPmiIsr) {
-	g_pDrvData->pCustomPmiIsr(dwCurCpu, ptBuffDesc);
-	}
-	*/
+	MSR_IA32_PERFEVTSELX_VERSION3 PerfEvtSelx = { 0 };
+	PerfEvtSelx.fields.Usr = true;
+	PerfEvtSelx.fields.Os = true;
+	PerfEvtSelx.fields.E = false;
+	PerfEvtSelx.fields.Int = true;
+	PerfEvtSelx.fields.CounterMask = 0;
+	PerfEvtSelx.fields.En = true;
+	PerfEvtSelx.fields.AnyThread = false;
+	PerfEvtSelx.fields.EventSelect = 0xC4;
+	PerfEvtSelx.fields.UnitMask = 0;
+	PerfEvtSelx.fields.Inv = false;
+	PerfEvtSelx.fields.Pc = false;
+	__writemsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx), PerfEvtSelx.all);
 
-	// Re-enable the PMI
+	MSR_IA32_PEBS_ENABLE Pebs_Enable = { 0 };
+	Pebs_Enable.fields.EnablePmc0 = true;
+	__writemsr(static_cast<ULONG>(Msr::Ia32PebsEnable), Pebs_Enable.all);
+
+	Ctrl.fields.EnablePmc0 = true;
+	__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
+
+	///PMU_DEBUG_INFO_LN_EX("Id: %x %d Done....", __readmsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx)), KeGetCurrentProcessorNumber());
+
+
 	if (g_pDrvData.bCpuX2ApicMode)
 	{
 		// Check Intel Manuals, Vol. 3A section 10-37
@@ -106,12 +118,12 @@ VOID IntelPtPmiHandler(PKTRAP_FRAME pTrapFrame)
 		if (!lpdwApicBase)
 			// XXX: Not sure how to continue, No MmMapIoSpace at this IRQL (should not happen)
 			KeBugCheckEx(INTERRUPT_EXCEPTION_NOT_HANDLED, NULL, NULL, NULL, NULL);
+
 		perfMonDesc.All = lpdwApicBase[0x340 / 4];
 		perfMonDesc.Fields.Masked = 0;
 		lpdwApicBase[0x340 / 4] = perfMonDesc.All;
 	}
- 
-	DbgPrintEx(0, 0, "KTRAP_FRAME: %p", pTrapFrame);
+	
 	return;
 };
  
