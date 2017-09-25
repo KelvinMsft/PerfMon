@@ -200,26 +200,95 @@ union MSR_IA32_PERF_GLOBAL_CTRL
 };
 static_assert(sizeof(MSR_IA32_PERF_GLOBAL_CTRL) == 8, "Size check");
 
+
+union MSR_IA32_MISC_ENABLE
+{
+	struct
+	{
+		ULONG64 FastStrEnable : 1;				/// < [0]	 
+		ULONG64 Reserved : 2;					/// < [2:1] 
+		ULONG64 AutoThermalCtrlCirEn: 1;		/// < [3]
+		ULONG64	Reserved1 : 3;					/// < [6:4]  
+		ULONG64	PerfMonAvaliable : 1;			/// < [7]  
+		ULONG64	Reserved2 : 3;					/// < [10:8]  
+		ULONG64	BTSUnavaliable : 1;				/// < [11]
+		ULONG64 PEBSUnavaiable : 1;				/// < [12] 
+		ULONG64 Reserved3 : 3;					/// < [15:13]
+		ULONG64 SpeedStepEnable : 1;			/// < [16]
+		ULONG64 Reserved5 : 1;					/// < [17]
+		ULONG64 MonitorFsmEnable : 1;			/// < [18]
+		ULONG64 Reserved6 : 3;					/// < [21:19]
+		ULONG64 LimitCpuidMaxval : 1;			/// < [22]
+		ULONG64 xTprMsgRwDisable : 1;			/// < [23]
+		ULONG64 Reserved7 : 10;					/// < [33:24]
+		ULONG64 XdDisable : 1;					/// < [34]
+		ULONG64 Reserved8 : 29;					/// < [63:35]
+	}fields;
+	ULONG64 all;
+};
+static_assert(sizeof(MSR_IA32_MISC_ENABLE) == 8, "Size check");
+
+
+union MSR_IA32_PEBS_ENABLE
+{
+	struct
+	{
+		ULONG64 EnablePmc0 : 1;	/// < [0]	 
+		ULONG64 EnablePmc1 : 1;	/// < [1]	 
+		ULONG64 EnablePmc2 : 1;	/// < [2]	 
+		ULONG64 EnablePmc3 : 1;	/// < [3]	 
+		ULONG64 Reserved : 28;	/// < [31:4]
+		ULONG64 LL_EN_PMC0 : 1;	/// < [32]
+		ULONG64 LL_EN_PMC1 : 1;	/// < [33]
+		ULONG64 LL_EN_PMC2 : 1;	/// < [34]
+		ULONG64 LL_EN_PMC3 : 1;	/// < [35]
+		ULONG64 Reserved2 : 28;	/// < [63:36]
+	}fields;
+	ULONG64 all;
+};
+static_assert(sizeof(MSR_IA32_PEBS_ENABLE) == 8, "Size check");
+
+
+union MSR_IA32_PERF_CAPABILITIES
+{
+	struct {
+		ULONG64 LbrFormat : 6;			/// <[5:0]
+		ULONG64 PebsTrap : 1;			/// <[6]
+		ULONG64 PebsSaveArchRegs : 1;	/// <[7]
+		ULONG64 PebsRecordFormat : 4;	/// <[11:8]
+		ULONG64 FreezeWhenSmm : 1;		/// <[12]
+		ULONG64 FullWidthCounter : 1;	/// <[13]
+		ULONG64 Reserved : 50;			/// <[63:14]
+	}fields;
+	ULONG64 all;
+};
+static_assert(sizeof(MSR_IA32_PERF_CAPABILITIES) == 8, "Size check");
 /// See: MODEL-SPECIFIC REGISTERS (MSRS)
 enum class Msr : unsigned int {
 	Ia32ApicBase = 0x01B,
 
-	Ia32FeatureControl = 0x03A, 
+	Ia32FeatureControl = 0x03A,
 	Ia32PMCx = 0xC1,
 	Ia32SysenterCs = 0x174,
 	Ia32SysenterEsp = 0x175,
-	Ia32SysenterEip = 0x176, 
+	Ia32SysenterEip = 0x176,
 	Ia32PerfEvtseLx = 0x186,
 	Ia32Debugctl = 0x1D9,
 
+	//PMU Related
 	Ia32FixedCtrl0 = 0x309,
 	Ia32FixedCtrl1 = 0x30A,
 	Ia32FixedCtrl2 = 0x30B,
- 	Ia32FixedCtrl  = 0x38D,
-	Ia32PerfGlobalStatus  = 0x38E,	// allows software to query counter overflow conditions on any combination of fixed - function PMCs or general - purpose PMCs via a single RDMSR.
-	Ia32PerfGlobalCtrl	  = 0x38F,	// allows software to enable/disable event counting of all or any combination of fixed - function PMCs(IA32_FIXED_CTRx) or any general - purpose PMCs via a single WRMSR.
+	Ia32PerfCaps = 0x345,
+	Ia32FixedCtrl = 0x38D,
+	Ia32PerfGlobalStatus = 0x38E,	// allows software to query counter overflow conditions on any combination of fixed - function PMCs or general - purpose PMCs via a single RDMSR.
+	Ia32PerfGlobalCtrl = 0x38F,	// allows software to enable/disable event counting of all or any combination of fixed - function PMCs(IA32_FIXED_CTRx) or any general - purpose PMCs via a single WRMSR.
 	Ia32PerfGlobalOvfCtrl = 0x390,  // allows software to clear counter overflow conditions on any combination of fixed - function PMCs or general - purpose PMCs via a single WRMSR.
-	
+
+	//PMU PEBS Related
+	Ia32MiscEnable = 0x1A0,
+	Ia32PebsEnable = 0x381,
+
 	Ia32VmxBasic = 0x480,
 	Ia32VmxPinbasedCtls = 0x481,
 	Ia32VmxProcBasedCtls = 0x482,

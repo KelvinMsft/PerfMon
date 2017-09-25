@@ -5,6 +5,7 @@
 #include "PMU.h"
 #include "Common.h"
 #include "PMI.h"
+#include "Log.h"
 extern "C"
 {
  
@@ -61,7 +62,9 @@ extern "C"
 		{ 
 			break;
 		}
- 
+		
+		PMU_DEBUG_INFO_LN_EX("Starting Environment Check... ");
+
 		status = PMUEnvironmentCheck(&g_EnvironmentInfo);
 		if (!NT_SUCCESS(status))
 		{ 
@@ -74,17 +77,17 @@ extern "C"
 			break;
 		}
 
-		DbgPrintEx(0, 0, "Computer is supported PMU SupportedVersion : %d SupportedFixedFunction: %d  SupportedBitWidth:  %d\
-						  SupportedAnyThread: %d SupportedNumOfPMCs: %d  SupporteWidthPerPMCs: %d  SupportedPerfEvents: %d \r\n",
-			g_EnvironmentInfo.SupportedVersion,
-			g_EnvironmentInfo.SupportedFixedFunction,
-			g_EnvironmentInfo.SupportedBitWidth,
-			g_EnvironmentInfo.SupportedAnyThread,
-			g_EnvironmentInfo.SupportedNumOfPMCs,
-			g_EnvironmentInfo.SupporteWidthPerPMCs,
-			g_EnvironmentInfo.SupportedPerfEvents
-		); 
-		 
+		PMU_DEBUG_INFO_LN_EX("----------------------------------------------------------------------");
+		PMU_DEBUG_INFO_LN_EX("SupportedVersion:%-30d",g_EnvironmentInfo.SupportedVersion		);
+		PMU_DEBUG_INFO_LN_EX("SupportedFixedFunction:%-30d",g_EnvironmentInfo.SupportedFixedFunction	);
+		PMU_DEBUG_INFO_LN_EX("SupportedBitWidth:%-30d "	,g_EnvironmentInfo.SupportedBitWidth		);
+		PMU_DEBUG_INFO_LN_EX("SupportedAnyThread:%-30d "	,g_EnvironmentInfo.SupportedAnyThread		);
+		PMU_DEBUG_INFO_LN_EX("SupportedNumOfPMCs:%-30d"	,g_EnvironmentInfo.SupportedNumOfPMCs		);
+		PMU_DEBUG_INFO_LN_EX("SupporteWidthPerPMCs:%-30d"	,g_EnvironmentInfo.SupporteWidthPerPMCs	);
+		PMU_DEBUG_INFO_LN_EX("SupportedPerfEvents:%-30d"	,g_EnvironmentInfo.SupportedPerfEvents		);
+		PMU_DEBUG_INFO_LN_EX("IsSupportPebs:%-30d"		,g_EnvironmentInfo.IsSupportPebs				);
+		PMU_DEBUG_INFO_LN_EX("-----------------------------------------------------------------------");
+
 		DrvObj->DriverUnload = DrvUnload;
 
 		END_DO_WHILE

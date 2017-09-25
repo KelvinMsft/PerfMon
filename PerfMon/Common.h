@@ -18,6 +18,8 @@ typedef struct _PMU_INFORMATION
 	UCHAR SupportedNumOfPMCs;
 	UCHAR SupporteWidthPerPMCs;
 	UCHAR SupportedPerfEvents;
+	UCHAR IsSupportPebs;
+	UCHAR IsSupportEmon;
 }PMUINFO, *PPMUINFO;
 
 
