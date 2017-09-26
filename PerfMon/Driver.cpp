@@ -39,15 +39,7 @@ extern "C"
 		UnregisterPmiInterrupt();
 		return;
 	} 
-	 
-	// Sleep the current thread's execution for Millisecond milli-seconds.
-	_Use_decl_annotations_ NTSTATUS UtilSleep(LONG Millisecond) {
-		PAGED_CODE();
-
-		LARGE_INTEGER interval = {};
-		interval.QuadPart = -(10000 * Millisecond);  // msec
-		return KeDelayExecutionThread(KernelMode, FALSE, &interval);
-	}
+ 
 	//--------------------------------------------------------------//
 	NTSTATUS DriverEntry(
 		_In_	PDRIVER_OBJECT DrvObj,
@@ -71,7 +63,9 @@ extern "C"
 			break;
 		}
 		 
-		status = UtilForEachProcessor(PMUInitiailization, &g_EnvironmentInfo);
+		status = UtilForEachProcessor(
+			PMUInitiailization, &g_EnvironmentInfo
+		);
 		if (!NT_SUCCESS(status))
 		{ 
 			break;

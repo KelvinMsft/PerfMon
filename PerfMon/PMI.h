@@ -1,5 +1,7 @@
 #pragma once
 #include <ntddk.h>
 
-NTSTATUS RegisterPmiInterrupt();
-NTSTATUS UnregisterPmiInterrupt();
+extern "C" {
+	NTSTATUS RegisterPmiInterrupt();
+	NTSTATUS UnregisterPmiInterrupt();
+}
