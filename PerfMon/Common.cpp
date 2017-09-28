@@ -27,7 +27,7 @@ extern "C"
 	}
 
 	//----------------------------------------------------------------------------------------//
-	void SetHash(HASHTABLE* HashTable, ULONG TableSize, ULONG_PTR ID, PVOID lpNode)
+	void SetHash(HASHTABLE* HashTable, ULONG TableSize, ULONG_PTR ID, ULONG lpNode)
 	{
 		ULONG Index = GetIndexByID(ID, TableSize);
 		HashTable[Index].ID = ID;
@@ -36,14 +36,14 @@ extern "C"
 	}
 
 	//----------------------------------------------------------------------------------------//
-	BOOLEAN GetHashIndexById(HASHTABLE* HashTable, ULONG TableSize, ULONG_PTR ID, PVOID* lpNode)
+	BOOLEAN GetHashIndexById(HASHTABLE* HashTable, ULONG TableSize, ULONG_PTR ID, ULONG* count)
 	{
 		ULONG_PTR Index = GetIndexByID(ID, TableSize);
 		if (HashTable[Index].ID == ID)
 		{
-			if (lpNode)
+			if (count)
 			{
-				*lpNode = HashTable[Index].Value;
+				*count = HashTable[Index].Value;
 			}
 
 			return TRUE;

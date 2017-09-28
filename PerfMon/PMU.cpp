@@ -3,18 +3,26 @@
 #include "Common.h"
 #include "Log.h"
 #include <intrin.h>
-
+#include "PMI.h"
 extern "C"
-{
-#define PERIOD 1000003
-
+{  
 	////////////////////////////////////////////////////////////////////
 	//// Types
 	////  
 
 
-#define PEBS_BUFFER_SIZE	(64 * 1024) /* PEBS buffer size */
-#define OUT_BUFFER_SIZE		(64 * 1024) /* must be multiple of 4k */
+	////////////////////////////////////////////////////////////////////
+	////  Marcos
+	////  
+	#define PEBS_BUFFER_SIZE	(64 * 1024) /* PEBS buffer size */
+	#define OUT_BUFFER_SIZE		(64 * 1024) /* must be multiple of 4k */
+ 
+	////////////////////////////////////////////////////////////////////
+	////  Global Variable
+	////  
+	UCHAR g_Event = 0;
+	UCHAR g_Mask = 0;
+	ULONG pebs_record_size = 0;
 
 //--------------------------------------------------------------//
 	NTSTATUS PMUEnvironmentCheck(
@@ -31,12 +39,12 @@ extern "C"
 		NTSTATUS status = STATUS_SUCCESS;
 
 		START_DO_WHILE
-			if (!Info)
-			{
-				DbgPrintEx(0, 0, "Computer is not supported PMU Version : %d \r\n", cpu_info[0]);
-				status = STATUS_UNSUCCESSFUL;
-				break;
-			}
+		if (!Info)
+		{
+			DbgPrintEx(0, 0, "Computer is not supported PMU Version : %d \r\n", cpu_info[0]);
+			status = STATUS_UNSUCCESSFUL;
+			break;
+		}
 
 		__cpuid(cpu_info, 0xA);
 		version = (UCHAR)(cpu_info[0] & 0xFF);
@@ -67,41 +75,13 @@ extern "C"
 
 		END_DO_WHILE
 
-			return status;
+		return status;
 	}
-	UCHAR g_Event = 0;
-	UCHAR g_Mask = 0;
-	ULONG pebs_record_size = 0;
 	//------------------------------------------------------//
-	static bool check_cpu(void)
-	{
-		int cpu_info[4];
-		int max, model, fam;
-		unsigned feat1, feat2;
-
-		__cpuid(cpu_info, 0);
-		if (memcmp(&cpu_info[1], "Genu", 4)) {
-			PMU_DEBUG_INFO_LN_EX("Not an Intel CPU\n");
-			return false;
-		}
-
-		max = cpu_info[0];
-
-		__cpuid(cpu_info, 1);
-
-		feat1 = cpu_info[2];
-		feat2 = cpu_info[3];
-
-		model = ((cpu_info[0] >> 4) & 0xf);
-		fam = (cpu_info[0] >> 8) & 0xf;
-		if (fam == 6 || fam == 0xf)
-			model += ((cpu_info[0] >> 16) & 0xf) << 4;
-		if (fam != 6) {
-			PMU_DEBUG_INFO_LN_EX("Not an supported Intel CPU\n");
-			return false;
-		}
-
-		switch (model)
+	NTSTATUS CheckMircoArchitecture(
+		_In_ ULONG Model)
+	{ 
+		switch (Model)
 		{
 		case 58: /* IvyBridge */
 		case 60:
@@ -119,41 +99,16 @@ extern "C"
 			break;
 
 		default:
-			PMU_DEBUG_INFO_LN_EX("Unknown CPU model %d\n", model);
-			return false;
+			PMU_DEBUG_INFO_LN_EX("Unknown CPU model %d\n", Model);
+			return STATUS_UNSUCCESSFUL;
 		}
-
-		/* Check if we support arch perfmon */
-		if (max >= 0xa)
-		{
-			__cpuid(cpu_info, 0xA);
-			if ((cpu_info[0] & 0xff) < 1)
-			{
-				PMU_DEBUG_INFO_LN_EX("No arch perfmon support\n");
-				return false;
-			}
-
-			if (((cpu_info[0] >> 8) & 0xff) < 1)
-			{
-				PMU_DEBUG_INFO_LN_EX("No generic counters\n");
-				return false;
-			}
-		}
-		else
-		{
-			PMU_DEBUG_INFO_LN_EX("No arch perfmon support\n");
-			return false;
-		}
-
-		/* check if we support DS */
-		if (!(feat2 & (1 << 21)))
-		{
-			PMU_DEBUG_INFO_LN_EX("No debug store support\n");
-			return false;
-		}
-
+		return STATUS_SUCCESS;
+	}
+	//------------------------------------------------------//
+	NTSTATUS CheckPerfCap(
+		_In_ ULONG feat1)
+	{
 		/* check perf capability */
-
 		if (feat1 & (1 << 15))
 		{
 			ULONG64 cap;
@@ -170,62 +125,167 @@ extern "C"
 				pebs_record_size = sizeof(struct pebs_v3);
 				break;
 			default:
+			{
 				PMU_DEBUG_INFO_LN_EX("Unsupported PEBS format\n");
-				return false;
+				return STATUS_UNSUCCESSFUL;
+			}
 			}
 			/* Could check PEBS_TRAP */
 		}
 		else
 		{
-			PMU_DEBUG_INFO_LN_EX("No PERF_CAPABILITIES support\n");
-			return false;
+			PMU_DEBUG_INFO_LN_EX("No PERF_CAPABILITIES support\n"); 
+			return STATUS_UNSUCCESSFUL;
+		}
+
+		return STATUS_SUCCESS;
+	}
+	//------------------------------------------------------//
+	NTSTATUS CheckSupportDebugStore(
+		_In_ ULONG Feat2)
+	{
+		/* check if we support DS */
+		if (!(Feat2 & (1 << 21)))
+		{
+			PMU_DEBUG_INFO_LN_EX("No debug store support\n");
+			return STATUS_UNSUCCESSFUL;
+		}
+		return STATUS_SUCCESS;
+	}
+	//------------------------------------------------------//
+	NTSTATUS CheckArchPlatform(
+		_In_ ULONG Max)
+	{
+		NTSTATUS status = STATUS_SUCCESS;
+		START_DO_WHILE
+		int cpu_info[4] = { 0 };
+		if (Max >= 0xa) 
+		{
+			__cpuid(cpu_info, 0xA);
+			if ((cpu_info[0] & 0xff) < 1)
+			{
+				PMU_DEBUG_INFO_LN_EX("No arch perfmon support\n");
+				status = STATUS_UNSUCCESSFUL;
+				break;
+			}
+
+			if (((cpu_info[0] >> 8) & 0xff) < 1)
+			{
+				PMU_DEBUG_INFO_LN_EX("No generic counters\n"); 
+				status = STATUS_UNSUCCESSFUL;
+				break;
+			}
+		}
+		else
+		{
+			PMU_DEBUG_INFO_LN_EX("No arch perfmon support\n");
+
+			status = STATUS_UNSUCCESSFUL;
+			break;
+		}
+
+		END_DO_WHILE
+
+		return status;
+	} 
+	//------------------------------------------------------//
+	NTSTATUS GetFamilyAndModel(
+		_In_ int* CpuInfo , 
+		_In_ int* Model,
+		_In_ int* Family
+	)
+	{
+		NTSTATUS status = STATUS_SUCCESS;
+		START_DO_WHILE
+		if (!CpuInfo ||!Model || !Family)
+		{
+			status = STATUS_UNSUCCESSFUL;
+			break;
+		}
+		 
+		*Model = ((CpuInfo[0] >> 4) & 0xf);
+		*Family = (CpuInfo[0] >> 8) & 0xf;
+		if (*Family == 6 || *Family == 0xf)
+		{
+			*Model += ((CpuInfo[0] >> 16) & 0xf) << 4;
+		}
+
+		END_DO_WHILE  
+		return status;
+	}
+
+	//------------------------------------------------------//
+	NTSTATUS CheckCpu()
+	{
+		int cpu_info[4] = {0};
+		int max, model, fam;
+		unsigned feat1, feat2;
+		NTSTATUS status = STATUS_SUCCESS;;
+		START_DO_WHILE
+
+		__cpuid(cpu_info, 0);
+		if (memcmp(&cpu_info[1], "Genu", 4)) 
+		{
+			PMU_DEBUG_INFO_LN_EX("Not an Intel CPU\n");
+			break;
+		} 
+		max = cpu_info[0];
+
+		__cpuid(cpu_info, 1); 
+		feat1 = cpu_info[2];
+		feat2 = cpu_info[3]; 
+
+		status = GetFamilyAndModel(cpu_info, &model, &fam);
+		if (!NT_SUCCESS(status) || fam != 6)
+		{
+			PMU_DEBUG_INFO_LN_EX("Not an supported Intel CPU\n");
+			break;
+		}
+
+		status = CheckMircoArchitecture(model);
+		if (!NT_SUCCESS(status))
+		{
+			break;
+		}
+
+		status = CheckArchPlatform(max);
+		if (!NT_SUCCESS(status))
+		{
+			break;
+		}
+
+		status = CheckSupportDebugStore(feat2);
+		if (!NT_SUCCESS(status))
+		{
+			break;
+		}
+
+		status = CheckPerfCap(feat1);
+		if (!NT_SUCCESS(status))
+		{
+			break;
 		}
 
 		PMU_DEBUG_INFO_LN_EX("Supported CPU : %x %x pebs_record_size: %x ", g_Mask, g_Event, pebs_record_size);
 
-		return true;
-	}
+		END_DO_WHILE 
+ 
+		return status;
+	} 
 
-	void* g_out = NULL;
-	debug_store g_ds[8] = { 0 };
 	//--------------------------------------------------------------//
-	/* Allocate DS and PEBS buffer */
-	static debug_store* AllocateResource(void)
+	VOID DisablePmi()
 	{
-		struct debug_store *ds = NULL;
-		unsigned num_pebs = 0;
-		ds = &g_ds[KeGetCurrentProcessorNumber()];
-		/* Set up buffer */
-		ds->pebs_base = (ULONG64)ExAllocatePoolWithTag(NonPagedPool, PEBS_BUFFER_SIZE, 'kNEL');
-		if (!ds->pebs_base) {
-			PMU_DEBUG_INFO_LN_EX("Cannot allocate PEBS buffer\n");
-			ExFreePool(ds);
-			ds = NULL;
-			return NULL;
-		}
-
-		memset((void *)ds->pebs_base, 0, PEBS_BUFFER_SIZE);
-		num_pebs = PEBS_BUFFER_SIZE / pebs_record_size;
-		ds->pebs_index = ds->pebs_base;
-		ds->pebs_max = ds->pebs_base + (num_pebs - 1) * pebs_record_size + 1;
-		ds->pebs_thresh = ds->pebs_base + (num_pebs - num_pebs / 10) * pebs_record_size;
-		ds->pebs_reset[0] = 0 - (ULONG64)PERIOD;
-
-		return ds;
+		MSR_IA32_PERF_GLOBAL_CTRL_VERSION2 Ctrl = { 0 };
+		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
 	}
-
-	static void* AllocateOutBuffer(void)
+	//--------------------------------------------------------------//
+	VOID EnablePmi()
 	{
-		void *outbu_base = NULL;
-
-		outbu_base = ExAllocatePoolWithTag(NonPagedPool, OUT_BUFFER_SIZE, 'kNEL');
-		if (!outbu_base) {
-			PMU_DEBUG_INFO_LN_EX("Cannot allocate out buffer\n");
-		}
-
-		return outbu_base;
+		MSR_IA32_PERF_GLOBAL_CTRL_VERSION2 Ctrl = { 0 };
+		Ctrl.fields.EnablePmc0 = true;
+		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
 	}
-
 
 	//--------------------------------------------------------------//
 	NTSTATUS PMUInitiailization(
@@ -235,20 +295,11 @@ extern "C"
 		START_DO_WHILE
 
 			PMUINFO* Info = (PMUINFO*)info;
-		if (!Info || !check_cpu())
+		if (!Info || !NT_SUCCESS(CheckCpu()))
 		{
 			return STATUS_UNSUCCESSFUL;
 		}
-		AllocateResource();
-
-		g_out = AllocateOutBuffer();
-		if (!g_out)
-		{
-			PMU_DEBUG_INFO_LN_EX("AllocateResource Error : %p", g_ds);
-			break;
-		}
-
-
+		 
 		switch (Info->SupportedVersion)
 		{
 		case 0:
@@ -257,15 +308,14 @@ extern "C"
 			break;
 		case 2:
 			break;
-		case 3:
-			__writemsr(static_cast<ULONG>(Msr::Ia32DsArea), (ULONG64)&g_ds[KeGetCurrentProcessorNumber()]);
+		case 3: 
+	
+			DisablePmi();
 
-			MSR_IA32_PERF_GLOBAL_CTRL_VERSION2 Ctrl = { 0 };
-			__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
 			__writemsr(static_cast<ULONG>(Msr::Ia32PMCx), (ULONG)0xFFFFFFFE);
 
 			MSR_IA32_PERFEVTSELX_VERSION3 PerfEvtSelx = { 0 };
-			PerfEvtSelx.fields.Usr = true;
+			PerfEvtSelx.fields.Usr = true;						//in case you want intercept user mode instruction...
 			PerfEvtSelx.fields.Os = true;
 			PerfEvtSelx.fields.E = false;
 			PerfEvtSelx.fields.Int = true;
@@ -277,14 +327,9 @@ extern "C"
 			PerfEvtSelx.fields.Inv = false;
 			PerfEvtSelx.fields.Pc = false;
 			__writemsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx), PerfEvtSelx.all);
-
-			MSR_IA32_PEBS_ENABLE Pebs_Enable = { 0 };
-			Pebs_Enable.fields.EnablePmc0 = true;
-			__writemsr(static_cast<ULONG>(Msr::Ia32PebsEnable), Pebs_Enable.all);
-
-			Ctrl.fields.EnablePmc0 = true;
-			__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
-
+			 
+			EnablePmi();
+		
 			PMU_DEBUG_INFO_LN_EX("Id: %x %d Done....", __readmsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx)), KeGetCurrentProcessorNumber());
 
 			break;

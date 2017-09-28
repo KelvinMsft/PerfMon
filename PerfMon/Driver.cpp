@@ -8,9 +8,7 @@
 #include "Log.h"
 extern "C"
 {
- 
-	 
-
+  
 	//////////////////////////////////////////////////////////////////
 	////	Prototype	
 	////	
@@ -48,7 +46,7 @@ extern "C"
 		UNREFERENCED_PARAMETER(RegistryString);
 		NTSTATUS status = STATUS_SUCCESS;
 		START_DO_WHILE
-	 
+		
 		status = RegisterPmiInterrupt();
 		if (!NT_SUCCESS(status))
 		{ 
@@ -83,7 +81,7 @@ extern "C"
 		PMU_DEBUG_INFO_LN_EX("IsSupportEmon:%-30d", g_EnvironmentInfo.IsSupportEmon);
 		 
 		PMU_DEBUG_INFO_LN_EX("-----------------------------------------------------------------------");
-
+		
 		DrvObj->DriverUnload = DrvUnload;
 
 		END_DO_WHILE

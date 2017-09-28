@@ -10,7 +10,8 @@
 
 #define DRV_NAME	  "PerfMon"
 
-extern "C" {
+extern "C" 
+{
 	typedef ULONG64 u64;
 
 	typedef struct _PMU_INFORMATION
@@ -82,11 +83,11 @@ extern "C" {
 	typedef struct _HASH_TABLE
 	{
 		ULONG_PTR ID;
-		PVOID	  Value;
+		ULONG	  Value;
 	}HASHTABLE, *PHASHTABLE;
 
-	void SetHash(HASHTABLE* HashTable, ULONG TableSize, ULONG_PTR ID, PVOID lpNode);
-	BOOLEAN GetHashIndexById(HASHTABLE* HashTable, ULONG TableSize, ULONG_PTR ID, PVOID* lpNode);
+	void SetHash(HASHTABLE* HashTable, ULONG TableSize, ULONG_PTR ID, ULONG count);
+	BOOLEAN GetHashIndexById(HASHTABLE* HashTable, ULONG TableSize, ULONG_PTR ID, ULONG* count);
 	void ClearHashById(HASHTABLE* HashTable, ULONG TableSize, ULONG_PTR ID);
 	ULONG GetIndexByID(ULONG_PTR ID, ULONG TableSize);
 

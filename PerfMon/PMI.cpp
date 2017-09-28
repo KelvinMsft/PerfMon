@@ -3,23 +3,32 @@
 #include "Apic.h"
 #include "Common.h"
 #include "Log.h"
-#include "x86.h"
-#include "..\capstone\include\capstone.h"
-#include "asm.h"
-#include "LDasm.h"
+#include "x86.h"  
+#include "ntimage.h"
+#include "PMU.h"
+
 extern "C"
-{
+{  
 	//////////////////////////////////////////////////////////////////
 	////	Types
 	////	 
+	typedef NTSTATUS(__fastcall *pNtQueryPerformanceCounter)(
+		_Out_     PLARGE_INTEGER PerformanceCounter,
+		_Out_opt_ PLARGE_INTEGER PerformanceFrequency
+	);	
+	
+	typedef NTSTATUS(__fastcall *pMyNtQuerySystemInformation)(
+		_In_      ULONG SystemInformationClass,
+		_Inout_   PVOID                    SystemInformation,
+		_In_      ULONG                    SystemInformationLength,
+		_Out_opt_ PULONG                   ReturnLength
+	);
 
 	// The PMI Handler function prototype
-	typedef VOID(*PMIHANDLER)(PKTRAP_FRAME TrapFrame);
-
-	// The custom PMI ISR routines
-	typedef VOID(*INTELPT_PMI_HANDLER)(ULONG dwCpuId, PVOID ptBuffDesc);
-
-
+	typedef VOID(*PMIHANDLER)(
+		_In_ PKTRAP_FRAME TrapFrame
+	);
+  
 	typedef struct _DRIVER_GLOBAL_DATA {
 		BOOLEAN bPtSupported;								// TRUE if Intel PT is supported
 		BOOLEAN bPmiInstalled;								// TRUE if I have correctly installed the PMI Handler routine
@@ -32,8 +41,7 @@ extern "C"
 		PRKEVENT pPmiEvent;									// The PMI event 
 		HANDLE hPmiEvent;									// The PMI event kernel handle
 		ULONG* lpApicBase;									// The APIC I/O memory VA
-		LVT_Entry pmiVectDesc;								// The starting PMI LVT Vector descriptor
-		INTELPT_PMI_HANDLER pCustomPmiIsr;					// The registered custom Kernel-Mode PMI Isr routine (if any)
+		LVT_Entry pmiVectDesc;								// The starting PMI LVT Vector descriptor 
 		KAFFINITY kLastCpuAffinity;							// The last trace CPU affinity (used only in user-mode tracing)
 		LIST_ENTRY userCallbackList;						// The user callback descriptor list
 		KSPIN_LOCK userCallbackListLock;					// The user callback descriptor list spinlock
@@ -41,104 +49,159 @@ extern "C"
 															// INTEL_PT_CAPABILITIES ptCapabilities;			// The Intel Processor Trace capabilities (moved to intelpt.h)
 															// PKINTERRUPT pkPmiInterrupt = NULL;				// The PMI Interrupt Object (moved to intelpt.h)
 	}DRIVER_GLOBAL_DATA, *PDRIVER_GLOBAL_DATA;
-
-
-	DRIVER_GLOBAL_DATA g_pDrvData;
-	extern void* g_out;
-	extern debug_store g_ds[8];
-	extern ULONG pebs_record_size;
-
-	ULONG g_printCount = 0;
-	bool g_IsUninit = false;
-
-	HASHTABLE inst_table[10000] = { 0 };
-	ULONG64 g_SystemCallOrg[8] = { 0 };
-	ULONG   g_SystemCall64Size = 0;
-	void SystemCallbackPrint()
+	 
+	///////////////////////////////////////////////////////////////////////
+	//// Global Variable 
+	////
+	
+	pMyNtQuerySystemInformation g_MyNtQuerySystemInformation = NULL;
+	pNtQueryPerformanceCounter  g_MyNtQueryPerformanceCounter = NULL;
+	DRIVER_GLOBAL_DATA			g_pDrvData = { 0 }; 
+	bool						g_IsUninit = false; 
+	HASHTABLE					g_inst_table[10000] = { 0 }; 
+	ULONG_PTR					g_InterruptFuncTable[256] = { 0 };
+	  
+	//-------------------------------------------------------------------//
+	NTSTATUS __fastcall MyNtQuerySystemInformation(
+		_In_      ULONG SystemInformationClass,
+		_Inout_   PVOID                    SystemInformation,
+		_In_      ULONG                    SystemInformationLength,
+		_Out_opt_ PULONG                   ReturnLength
+	)
 	{
-		PMU_DEBUG_INFO_LN_EX("SystemCallbackPrint..... ");
+		PMU_DEBUG_INFO_LN_EX("g_MyNtQuerySystemInformation : %x \r\n", SystemInformationClass);
+		return g_MyNtQuerySystemInformation(SystemInformationClass, SystemInformation, SystemInformationLength, ReturnLength);
+	}
+	//-------------------------------------------------------------------//
+	NTSTATUS __fastcall MyNtQueryPerformanceCounter(
+		_Out_     PLARGE_INTEGER PerformanceCounter,
+		_Out_opt_ PLARGE_INTEGER PerformanceFrequency
+	)
+	{
+		PMU_DEBUG_INFO_LN_EX("NtQueryPerformanceCounter Hook \r\n");
+		return g_MyNtQueryPerformanceCounter(PerformanceCounter, PerformanceFrequency);
+	}
+	//-------------------------------------------------------------------//
+	NTSTATUS ResetApic()
+	{
+		LVT_Entry perfMonDesc = { 0 };
+		PULONG lpdwApicBase = g_pDrvData.lpApicBase;
+		NTSTATUS status = STATUS_SUCCESS;
+		if (g_pDrvData.bCpuX2ApicMode)
+		{
+			// Check Intel Manuals, Vol. 3A section 10-37
+			ULONGLONG perfMonEntry = __readmsr(MSR_IA32_X2APIC_LVT_PMI);
+			perfMonDesc.All = (ULONG)perfMonEntry;
+			perfMonDesc.Fields.Masked = 0;
+			perfMonEntry = (ULONGLONG)perfMonDesc.All;
+			__writemsr(MSR_IA32_X2APIC_LVT_PMI, perfMonEntry);
+		}
+		else
+		{
+			if (!lpdwApicBase)
+				// XXX: Not sure how to continue, No MmMapIoSpace at this IRQL (should not happen)
+				KeBugCheckEx(INTERRUPT_EXCEPTION_NOT_HANDLED, NULL, NULL, NULL, NULL);
+
+			perfMonDesc.All = lpdwApicBase[0x340 / 4];
+			perfMonDesc.Fields.Masked = 0;
+			lpdwApicBase[0x340 / 4] = perfMonDesc.All;
+		}
+		return status; 
+	} 
+	//--------------------------------------------------------------//
+	VOID HandlePageFault(PKTRAP_FRAME pTrapFrame)
+	{ 
+		PMU_DEBUG_INFO_LN_EX("[#PF : %d] cr3: %p pTrapFrame->Rip: %p R10: %I64x Rax: %I64X  sysycalladdr: %p ",
+			KeGetCurrentProcessorNumber(), __readcr3(), pTrapFrame->Rip, pTrapFrame->R10, pTrapFrame->Rax, __readmsr(static_cast<ULONG>(Msr::Ia32Lstar))); 
 	}
 
-	ULONG64 GetCurrentCpuSystemCallOrg()
-	{
-		NT_ASSERT(g_SystemCallOrg[KeGetCurrentProcessorNumber()]);
-		return g_SystemCallOrg[KeGetCurrentProcessorNumber()];
+	//--------------------------------------------------------------//
+	VOID HandleBreakpointTrap(PKTRAP_FRAME pTrapFrame)
+	{  
+		PMU_DEBUG_INFO_LN_EX("[#BP : %d] cr3: %p pTrapFrame->Rip: %p R10: %I64x Rax: %I64X  sysycalladdr: %p ",
+			KeGetCurrentProcessorNumber(), __readcr3(), pTrapFrame->Rip, pTrapFrame->R10, pTrapFrame->Rax, __readmsr(static_cast<ULONG>(Msr::Ia32Lstar)));
+
+	}	
+	//--------------------------------------------------------------//
+	VOID HandleGeneralProtectException(PKTRAP_FRAME pTrapFrame)
+	{ 
+		PMU_DEBUG_INFO_LN_EX("[#GP : %d] cr3: %p pTrapFrame->Rip: %p R10: %I64x Rax: %I64X  sysycalladdr: %p ",
+			KeGetCurrentProcessorNumber(), __readcr3(), pTrapFrame->Rip, pTrapFrame->R10, pTrapFrame->Rax, __readmsr(static_cast<ULONG>(Msr::Ia32Lstar)));
+
 	}
 	//--------------------------------------------------------------//
-	// The PMI LVT handler routine (Warning! This should run at very high IRQL)
-	VOID IntelPtPmiHandler(PKTRAP_FRAME pTrapFrame)
+	VOID HandleSyscall(PKTRAP_FRAME pTrapFrame)
 	{
-		struct pebs_v1 *pebs, *end; // *pebs2, 
-	//	PKDPC pProcDpc = NULL;									// This processor DPC
-		MSR_IA32_PERF_GLOBAL_STATUS_DESC pmiDesc = { 0 };		// The PMI Interrupt descriptor
-		MSR_IA32_PERF_GLOBAL_OVF_CTRL OvfCtrl = { 0 };
-		LVT_Entry perfMonDesc = { 0 };							// The LVT Performance Monitoring register 
-		PULONG lpdwApicBase = g_pDrvData.lpApicBase;			// The LVT Apic I/O space base address (if not in x2Apic mode)
+		ULONG count = 0;
+		if (!GetHashIndexById(g_inst_table, 10000, pTrapFrame->Rip, &count))
+		{
+			PMU_DEBUG_INFO_LN_EX("[syscall/sysenter Cpu No. : %d] cr3: %p pTrapFrame->Rip: %p R10: %I64x Rax: %I64X  sysycalladdr: %p ",
+				KeGetCurrentProcessorNumber(), __readcr3(), pTrapFrame->Rip, pTrapFrame->R10, pTrapFrame->Rax, __readmsr(static_cast<ULONG>(Msr::Ia32Lstar)));
+			SetHash(g_inst_table, 10000, pTrapFrame->Rip, count++);
+		}
+		else
+		{
+			GetHashIndexById(g_inst_table, 10000, pTrapFrame->Rip, &count);
+			SetHash(g_inst_table, 10000, pTrapFrame->Rip, count++);
+			PMU_DEBUG_INFO_LN_EX("Rip: %p count : %x ", pTrapFrame->Rip, count);
+		}
+
+		if (((pTrapFrame->Rip & 0xFFF) == 0xC10) ||
+			((pTrapFrame->Rip & 0xFFF) == 0xEA2))
+		{
+
+			if (pTrapFrame->R10 == (ULONG64)g_MyNtQuerySystemInformation)
+			{
+				g_MyNtQuerySystemInformation = (pMyNtQuerySystemInformation)pTrapFrame->R10;
+				pTrapFrame->R10 = (ULONG64)MyNtQuerySystemInformation;
+				PMU_DEBUG_INFO_LN_EX("[Syscall exploting] NtQueryPerformanceCounter Hook %p ==> %p", g_MyNtQuerySystemInformation, pTrapFrame->R10);
+			}
+			PMU_DEBUG_INFO_LN_EX("[Syscall exploting] r10: %p g_MyNtQuerySystemInformation: %p Src: %x ", pTrapFrame->R10, g_MyNtQuerySystemInformation, (pTrapFrame->Rip & 0xFFF));
+		}
+	}
+	//--------------------------------------------------------------//
+	NTSTATUS DispatchPmiEvent(PKTRAP_FRAME pTrapFrame)
+	{
 		ULONG64 SystemCall64 = __readmsr(static_cast<ULONG>(Msr::Ia32Lstar));
-	
+
+		if (pTrapFrame->Rip >= g_InterruptFuncTable[0xE] && pTrapFrame->Rip <= g_InterruptFuncTable[0xE] + 1000)
+		{
+			HandlePageFault(pTrapFrame);
+		}
+
+		if (pTrapFrame->Rip >= g_InterruptFuncTable[0x3] && pTrapFrame->Rip <= g_InterruptFuncTable[0x3] + 1000)
+		{
+			HandleBreakpointTrap(pTrapFrame);
+		}
+
+		if (pTrapFrame->Rip >= g_InterruptFuncTable[0xD] && pTrapFrame->Rip <= g_InterruptFuncTable[0xD] + 1000)
+		{
+			HandleGeneralProtectException(pTrapFrame);
+		}
+
+		if (pTrapFrame->Rip >= SystemCall64 && pTrapFrame->Rip <= SystemCall64 + 1400)
+		{
+			HandleSyscall(pTrapFrame);
+		}
+
+		return STATUS_SUCCESS;
+	}
+	//--------------------------------------------------------------// 
+	VOID IntelPerformanceMonitorInterrupt(PKTRAP_FRAME pTrapFrame)
+	{    
+ 
 		START_DO_WHILE
 
 		if (g_IsUninit)
 		{
-			break;;
+			break;
 		}
+		 
+		DisablePmi(); 
 
- 
-		//	DWORD dwCurCpu = 0;
-
-		if (g_printCount % 1000 == 0)
-			PMU_DEBUG_INFO_LN_EX("[PROC Id: %d] IntelPtPmiHandler %p ", KeGetCurrentProcessorNumber(), pTrapFrame->Rip);
-
-		MSR_IA32_PERF_GLOBAL_CTRL_VERSION2 Ctrl = { 0 };
-		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
-
-		OvfCtrl.fields.OvfBuf = true;
-		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalOvfCtrl), OvfCtrl.all);
-
-		__writemsr(static_cast<ULONG>(Msr::Ia32PMCx), (ULONG)0xFFFFFFFE);
-
-		debug_store* ds_area = (debug_store*)__readmsr(static_cast<ULONG>(Msr::Ia32DsArea));
-		end = (struct pebs_v1 *)ds_area->pebs_index;
-
-		for (pebs = (struct pebs_v1 *)ds_area->pebs_base;// (struct pebs_v1 *)pebs2 = (struct pebs_v1 *)tmp->pebs_base;
-			pebs < end;
-			pebs = (struct pebs_v1 *)((char *)pebs + pebs_record_size))//, pebs2 = (struct pebs_v1 *)((char*) pebs2+ pebs_record_size))
-		{
-			u64 ip = pebs->ip;
-			if (pebs_record_size >= sizeof(struct pebs_v2))
-				ip = ((struct pebs_v2 *)pebs)->eventing_ip;
-			 
-			 
-
-		} 
-		if (pTrapFrame->Rip >= SystemCall64 && pTrapFrame->Rip <= SystemCall64 + 1400)
-		{
-			if (!GetHashIndexById(inst_table, 10000, pTrapFrame->Rip, NULL))
-			{
-				/*pTrapFrame->Rsp -= 8;
-				*(PULONG64)pTrapFrame->Rsp = pTrapFrame->Rip;
-				pTrapFrame->Rip = (ULONG64)AsmSysCallStub;*/
-				PMU_DEBUG_INFO_LN_EX("[syscall/sysenter Cpu No. : %d] cr3: %p pTrapFrame->Rip: %p FaultAddr: %p sysycalladdr: %p ", 
-					KeGetCurrentProcessorNumber(),	__readcr3(), pTrapFrame->Rip, pTrapFrame->FaultAddress , __readmsr(static_cast<ULONG>(Msr::Ia32Lstar)));
-				SetHash(inst_table, 10000, pTrapFrame->Rip, NULL);
-			}
-			if (((pTrapFrame->Rip & 0xFFF )== 0xACE || 
-				 (pTrapFrame->Rip & 0xFFF) == 0xA7A  ) && (g_printCount % 1000) == 0)
-			{
-				PMU_DEBUG_INFO_LN_EX("[Syscall exploting] Rip: %p rax: %x r10: %p ", pTrapFrame->Rip , pTrapFrame->Rax, pTrapFrame->R10);
-			}
-		} 
-
-		/*	
-			//Disable Hardware Breakpoint
-
-			pTrapFrame->Dr0 = 0;
-			pTrapFrame->Dr1 = 0; 
-			pTrapFrame->Dr2 = 0; 
-			pTrapFrame->Dr3 = 0;
-		*/
+		DispatchPmiEvent(pTrapFrame);
 		
-		ds_area->pebs_index = ds_area->pebs_base;
+		__writemsr(static_cast<ULONG>(Msr::Ia32PMCx), (ULONG)0xFFFFFFFE);
 
 		MSR_IA32_PERFEVTSELX_VERSION3 PerfEvtSelx = { 0 };
 		PerfEvtSelx.fields.Usr = true;
@@ -152,63 +215,61 @@ extern "C"
 		PerfEvtSelx.fields.UnitMask = 0x40;
 		PerfEvtSelx.fields.Inv = false;
 		PerfEvtSelx.fields.Pc = false;
+
 		__writemsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx), PerfEvtSelx.all);
 
-		MSR_IA32_PEBS_ENABLE Pebs_Enable = { 0 };
-		Pebs_Enable.fields.EnablePmc0 = true;
-		__writemsr(static_cast<ULONG>(Msr::Ia32PebsEnable), Pebs_Enable.all);
-
-		Ctrl.fields.EnablePmc0 = true;
-		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
-
+		EnablePmi();
+ 
 		END_DO_WHILE
 
-		if (g_pDrvData.bCpuX2ApicMode)
-		{
-			// Check Intel Manuals, Vol. 3A section 10-37
-			ULONGLONG perfMonEntry = __readmsr(MSR_IA32_X2APIC_LVT_PMI);
-			perfMonDesc.All = (ULONG)perfMonEntry;
-			perfMonDesc.Fields.Masked = 0;
-			perfMonEntry = (ULONGLONG)perfMonDesc.All;
-			__writemsr(MSR_IA32_X2APIC_LVT_PMI, perfMonEntry);
-		}
-		else {
-			if (!lpdwApicBase)
-				// XXX: Not sure how to continue, No MmMapIoSpace at this IRQL (should not happen)
-				KeBugCheckEx(INTERRUPT_EXCEPTION_NOT_HANDLED, NULL, NULL, NULL, NULL);
-
-			perfMonDesc.All = lpdwApicBase[0x340 / 4];
-			perfMonDesc.Fields.Masked = 0;
-			lpdwApicBase[0x340 / 4] = perfMonDesc.All;
-		}
-
-		g_printCount++;
+		//sth must be done~!
+		ResetApic();
 
 		return;
-	};
-
-	// Register the LVT (Local Vector Table) PMI interrupt
+	}
 	//--------------------------------------------------------------//
-	NTSTATUS RegisterPmiInterrupt()
+	NTSTATUS InitSSDTHook()
 	{
-		NTSTATUS ntStatus = STATUS_SUCCESS;						// Returned NTSTATUS
-		PMIHANDLER pNewPmiHandler = NULL;
-		//PMIHANDLER pOldPmiHandler = NULL; 					// The old PMI handler (currently not implemented)
-		
-		if (!g_SystemCall64Size)
+
+		g_MyNtQuerySystemInformation = (pMyNtQuerySystemInformation)UtilGetSystemProcAddress(L"NtQuerySystemInformation");
+
+		if (!g_MyNtQuerySystemInformation)
 		{
-			//ULONG64 SystemCall64 = __readmsr(static_cast<ULONG>(Msr::Ia32Lstar));
-		//	g_SystemCall64Size = SizeOfProc((void*)SystemCall64);
+			PMU_DEBUG_INFO_LN_EX("[FATAL] : %p ", g_MyNtQuerySystemInformation);
+			return STATUS_UNSUCCESSFUL;
 		}
 
-		CHAR lpBuff[0x20] = { 0 };
-		//XXX ULONG dwBytesIo = 0;								// Number of I/O bytes
+		PMU_DEBUG_INFO_LN_EX("g_MyNtQueryPerformanceCounter: %p", g_MyNtQuerySystemInformation);
+		return STATUS_SUCCESS;
+	}
 
+	 
+	//--------------------------------------------------------------//
+	NTSTATUS InitInterrupt()
+	{
+		IDTDESC info = { 0 };
+		PKIDTENTRY64 IdtEntry ;
+		__sidt(&info); 
+		IdtEntry = (PKIDTENTRY64)info.BASE;
+		for (int i = 0; i < 256; i++)
+		{
+			ULONG64 handler = 0;
+			handler = ((ULONG64)IdtEntry[i].u.OffsetLow | ((ULONG64)IdtEntry[i].u.OffsetMiddle << 16) | ((ULONG64)IdtEntry[i].u.OffsetHigh << 32));
+			g_InterruptFuncTable[i] = handler;
+			PMU_DEBUG_INFO_LN_EX("Idt[%x]: %p", i, handler);
+		}  
+		return STATUS_SUCCESS;
+
+	}
+	//--------------------------------------------------------------//
+	NTSTATUS InitApic()
+	{
 		// First of all we need to search for HalpLocalApic symbol
 		MSR_IA32_APIC_BASE_DESC ApicBase = { 0 };				// In Multi-processors systems this address could change
 		ApicBase.All = __readmsr(MSR_IA32_APIC_BASE);			// In Windows systems all the processors LVT are mapped at the same physical address
 
-		if (!ApicBase.Fields.EXTD) {
+		if (!ApicBase.Fields.EXTD)
+		{
 			ULONG* lpdwApicBase = NULL;
 			PHYSICAL_ADDRESS apicPhys = { 0 };
 
@@ -221,29 +282,55 @@ extern "C"
 				g_pDrvData.lpApicBase = lpdwApicBase;
 			}
 			else
+			{
 				return STATUS_NOT_SUPPORTED;
-
-			// Now read the entry 0x340 (not really needed)
-			//g_pDrvData->pmiVectDesc.All = lpdwApicBase[0x340 / 4];
+			}
 		}
-		else {
+		else
+		{
 			// Current system uses x2APIC mode, no need to map anything
 			g_pDrvData.bCpuX2ApicMode = TRUE;
-		}
-
-
-		// The following functions must be stored in HalDispatchTable 
-		// TODO: Find a way to proper get the old PMI interrupt handler routine. Search inside the HAL code?
-		// ntStatus = HalQuerySystemInformation(HalProfileSourceInformation, COUNTOF(lpBuff), (LPVOID)lpBuff, &dwBytesIo);		
-
-		// Now set the new PMI handler, WARNING: we do not save and restore old handler
-		pNewPmiHandler = IntelPtPmiHandler;
-		ntStatus = HalSetSystemInformation(HalProfileSourceInterruptHandler, sizeof(PMIHANDLER), (PVOID)&pNewPmiHandler);
+		} 
+		return STATUS_SUCCESS;
+	}
+	//--------------------------------------------------------------//
+	NTSTATUS SetUpPerformanceInterrutpHandler(PMIHANDLER Handler)
+	{
+		PMIHANDLER pNewPmiHandler = Handler;
+		NTSTATUS ntStatus = HalSetSystemInformation(HalProfileSourceInterruptHandler, sizeof(PMIHANDLER), (PVOID)&pNewPmiHandler);
 		if (NT_SUCCESS(ntStatus))
 		{
 			DbgPrintEx(0, 0, "[" DRV_NAME "] Successfully registered system PMI handler to function 0x%llX.\r\n", (PVOID)pNewPmiHandler);
 		}
+		return ntStatus;
+	} 
 
+	//--------------------------------------------------------------//
+	NTSTATUS RegisterPmiInterrupt()
+	{
+		NTSTATUS ntStatus = STATUS_SUCCESS;					 
+		ntStatus = InitSSDTHook();
+		if (!NT_SUCCESS(ntStatus))
+		{
+			return ntStatus;
+		}
+		ntStatus = InitInterrupt();
+		if (!NT_SUCCESS(ntStatus))
+		{
+			return ntStatus;
+		}
+
+		ntStatus = InitApic();
+		if (!NT_SUCCESS(ntStatus))
+		{
+			return ntStatus;
+		}
+		ntStatus = SetUpPerformanceInterrutpHandler(IntelPerformanceMonitorInterrupt);  
+		if (!NT_SUCCESS(ntStatus))
+		{
+			return ntStatus;
+		}
+		 
 		return ntStatus;
 	}
 	//--------------------------------------------------------------//
@@ -268,9 +355,13 @@ extern "C"
 
 		if (NT_SUCCESS(ntStatus))
 		{
-			g_pDrvData.bPmiInstalled = FALSE;
-			if (g_pDrvData.lpApicBase)
-				MmUnmapIoSpace(g_pDrvData.lpApicBase, 0x1000);
+			return ntStatus;
+		}
+
+		g_pDrvData.bPmiInstalled = FALSE;
+		if (g_pDrvData.lpApicBase)
+		{
+			MmUnmapIoSpace(g_pDrvData.lpApicBase, 0x1000);
 		}
 
 		return ntStatus;
