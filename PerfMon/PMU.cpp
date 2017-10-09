@@ -39,6 +39,7 @@ extern "C"
 		NTSTATUS status = STATUS_SUCCESS;
 
 		START_DO_WHILE
+
 		if (!Info)
 		{
 			DbgPrintEx(0, 0, "Computer is not supported PMU Version : %d \r\n", cpu_info[0]);
@@ -61,7 +62,9 @@ extern "C"
 			break;
 		}
 
-		MSR_IA32_MISC_ENABLE MiscEnable = { __readmsr(static_cast<ULONG>(Msr::Ia32MiscEnable)) };
+		MSR_IA32_MISC_ENABLE MiscEnable = {0 };
+
+		UtilReadMsr(Msr::Ia32MiscEnable, &MiscEnable.all);
 
 		Info->SupportedVersion = version;
 		Info->SupportedFixedFunction = SupportedFixedFunction;
@@ -158,6 +161,7 @@ extern "C"
 	{
 		NTSTATUS status = STATUS_SUCCESS;
 		START_DO_WHILE
+
 		int cpu_info[4] = { 0 };
 		if (Max >= 0xa) 
 		{
@@ -277,14 +281,14 @@ extern "C"
 	VOID DisablePmi()
 	{
 		MSR_IA32_PERF_GLOBAL_CTRL_VERSION2 Ctrl = { 0 };
-		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
+		UtilWriteMsr(Msr::Ia32PerfGlobalCtrl, Ctrl.all);
 	}
 	//--------------------------------------------------------------//
 	VOID EnablePmi()
 	{
 		MSR_IA32_PERF_GLOBAL_CTRL_VERSION2 Ctrl = { 0 };
 		Ctrl.fields.EnablePmc0 = true;
-		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), Ctrl.all);
+		UtilWriteMsr(Msr::Ia32PerfGlobalCtrl, Ctrl.all);
 	}
 
 	//--------------------------------------------------------------//
@@ -312,7 +316,7 @@ extern "C"
 	
 			DisablePmi();
 
-			__writemsr(static_cast<ULONG>(Msr::Ia32PMCx), (ULONG)0xFFFFFFFE);
+			UtilWriteMsr(Msr::Ia32PMCx, (ULONG)0xFFFFFFFE);
 
 			MSR_IA32_PERFEVTSELX_VERSION3 PerfEvtSelx = { 0 };
 			PerfEvtSelx.fields.Usr = true;						//in case you want intercept user mode instruction...
@@ -326,11 +330,11 @@ extern "C"
 			PerfEvtSelx.fields.UnitMask = 0x40;
 			PerfEvtSelx.fields.Inv = false;
 			PerfEvtSelx.fields.Pc = false;
-			__writemsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx), PerfEvtSelx.all);
+			UtilWriteMsr(Msr::Ia32PerfEvtseLx, PerfEvtSelx.all);
 			 
 			EnablePmi();
 		
-			PMU_DEBUG_INFO_LN_EX("Id: %x %d Done....", __readmsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx)), KeGetCurrentProcessorNumber());
+			PMU_DEBUG_INFO_LN_EX("Id: %x %d Done....", PerfEvtSelx.all, KeGetCurrentProcessorNumber());
 
 			break;
 		}

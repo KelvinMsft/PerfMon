@@ -1,5 +1,7 @@
 
 #include <ntddk.h>  
+#include "x86.h"
+#include <intrin.h>
 extern "C" 
 {
 	//-----------------------------------------------------------------------------//
@@ -47,6 +49,41 @@ extern "C"
 			}
 		}
 		return STATUS_SUCCESS;
+	}
+
+	//-----------------------------------------------------------------------------//
+	NTSTATUS UtilWriteMsr(Msr msr, ULONG64 Value)
+	{
+		NTSTATUS status = STATUS_SUCCESS;
+		__try
+		{
+			__writemsr(static_cast<ULONG>(msr),Value);
+		}
+		__except (0)
+		{
+			status = STATUS_UNSUCCESSFUL;
+		}
+		return status;
+	}
+	
+	//-----------------------------------------------------------------------------//
+	NTSTATUS UtilReadMsr(Msr msr, ULONG64* Value)
+	{
+		NTSTATUS status = STATUS_SUCCESS;
+		if (!Value)
+		{
+			status = STATUS_INVALID_PARAMETER;
+			return status;
+		}
+		__try
+		{	
+			*Value = __readmsr(static_cast<ULONG>(msr));
+		}
+		__except (0) 
+		{
+			status = STATUS_UNSUCCESSFUL;
+		}
+		return status;
 	}
 	//-----------------------------------------------------------------------------//
 }

@@ -90,11 +90,12 @@ extern "C"
 		if (g_pDrvData.bCpuX2ApicMode)
 		{
 			// Check Intel Manuals, Vol. 3A section 10-37
-			ULONGLONG perfMonEntry = __readmsr(MSR_IA32_X2APIC_LVT_PMI);
+			ULONGLONG perfMonEntry = 0;
+			UtilReadMsr(Msr::Ia32x2ApivIvtPmi, &perfMonEntry);
 			perfMonDesc.All = (ULONG)perfMonEntry;
 			perfMonDesc.Fields.Masked = 0;
 			perfMonEntry = (ULONGLONG)perfMonDesc.All;
-			__writemsr(MSR_IA32_X2APIC_LVT_PMI, perfMonEntry);
+			UtilWriteMsr(Msr::Ia32x2ApivIvtPmi, perfMonEntry);
 		}
 		else
 		{
@@ -120,6 +121,8 @@ extern "C"
 	{  
 		PMU_DEBUG_INFO_LN_EX("[#BP : %d] cr3: %p pTrapFrame->Rip: %p R10: %I64x Rax: %I64X  sysycalladdr: %p ",
 			KeGetCurrentProcessorNumber(), __readcr3(), pTrapFrame->Rip, pTrapFrame->R10, pTrapFrame->Rax, __readmsr(static_cast<ULONG>(Msr::Ia32Lstar)));
+
+		*(PULONG64)(((PUCHAR)pTrapFrame->Rbp) + 0xE8) = 0;
 
 	}	
 	//--------------------------------------------------------------//
@@ -162,11 +165,17 @@ extern "C"
 	//--------------------------------------------------------------//
 	NTSTATUS DispatchPmiEvent(PKTRAP_FRAME pTrapFrame)
 	{
-		ULONG64 SystemCall64 = __readmsr(static_cast<ULONG>(Msr::Ia32Lstar));
+		ULONG64 SystemCall64 = 0;
+		NTSTATUS status = STATUS_SUCCESS;
+		status = UtilReadMsr(Msr::Ia32Lstar, &SystemCall64);
+		if (!NT_SUCCESS(status))
+		{
+			return status;
+		}
 
 		if (pTrapFrame->Rip >= g_InterruptFuncTable[0xE] && pTrapFrame->Rip <= g_InterruptFuncTable[0xE] + 1000)
 		{
-			HandlePageFault(pTrapFrame);
+		//	HandlePageFault(pTrapFrame);
 		}
 
 		if (pTrapFrame->Rip >= g_InterruptFuncTable[0x3] && pTrapFrame->Rip <= g_InterruptFuncTable[0x3] + 1000)
@@ -176,15 +185,15 @@ extern "C"
 
 		if (pTrapFrame->Rip >= g_InterruptFuncTable[0xD] && pTrapFrame->Rip <= g_InterruptFuncTable[0xD] + 1000)
 		{
-			HandleGeneralProtectException(pTrapFrame);
+		//	HandleGeneralProtectException(pTrapFrame);
 		}
 
 		if (pTrapFrame->Rip >= SystemCall64 && pTrapFrame->Rip <= SystemCall64 + 1400)
 		{
-			HandleSyscall(pTrapFrame);
+		//	HandleSyscall(pTrapFrame);
 		}
 
-		return STATUS_SUCCESS;
+		return status;
 	}
 	//--------------------------------------------------------------// 
 	VOID IntelPerformanceMonitorInterrupt(PKTRAP_FRAME pTrapFrame)
@@ -201,7 +210,7 @@ extern "C"
 
 		DispatchPmiEvent(pTrapFrame);
 		
-		__writemsr(static_cast<ULONG>(Msr::Ia32PMCx), (ULONG)0xFFFFFFFE);
+		UtilWriteMsr(Msr::Ia32PMCx, (ULONG)0xFFFFFFFE);
 
 		MSR_IA32_PERFEVTSELX_VERSION3 PerfEvtSelx = { 0 };
 		PerfEvtSelx.fields.Usr = true;
@@ -216,7 +225,7 @@ extern "C"
 		PerfEvtSelx.fields.Inv = false;
 		PerfEvtSelx.fields.Pc = false;
 
-		__writemsr(static_cast<ULONG>(Msr::Ia32PerfEvtseLx), PerfEvtSelx.all);
+		UtilWriteMsr(Msr::Ia32PerfEvtseLx, PerfEvtSelx.all);
 
 		EnablePmi();
  
@@ -266,7 +275,13 @@ extern "C"
 	{
 		// First of all we need to search for HalpLocalApic symbol
 		MSR_IA32_APIC_BASE_DESC ApicBase = { 0 };				// In Multi-processors systems this address could change
-		ApicBase.All = __readmsr(MSR_IA32_APIC_BASE);			// In Windows systems all the processors LVT are mapped at the same physical address
+		NTSTATUS status = STATUS_SUCCESS;
+		status = UtilReadMsr(Msr::Ia32ApicBase, &ApicBase.All);			// In Windows systems all the processors LVT are mapped at the same physical address
+
+		if (!NT_SUCCESS(status))
+		{
+			return status;
+		}
 
 		if (!ApicBase.Fields.EXTD)
 		{
@@ -283,7 +298,8 @@ extern "C"
 			}
 			else
 			{
-				return STATUS_NOT_SUPPORTED;
+				status = STATUS_NOT_SUPPORTED;
+				return status;
 			}
 		}
 		else
@@ -291,7 +307,7 @@ extern "C"
 			// Current system uses x2APIC mode, no need to map anything
 			g_pDrvData.bCpuX2ApicMode = TRUE;
 		} 
-		return STATUS_SUCCESS;
+		return status;
 	}
 	//--------------------------------------------------------------//
 	NTSTATUS SetUpPerformanceInterrutpHandler(PMIHANDLER Handler)
@@ -340,13 +356,13 @@ extern "C"
 		NTSTATUS ntStatus = STATUS_SUCCESS;						// Returned NTSTATUS
 		PMIHANDLER pOldPmiHandler = g_pDrvData.pOldPmiHandler;	// The old PMI handler
 
-		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalCtrl), 0);
+		UtilWriteMsr(Msr::Ia32PerfGlobalCtrl, 0);
 
-		__writemsr(static_cast<ULONG>(Msr::Ia32PerfGlobalOvfCtrl), 0);
+		UtilWriteMsr(Msr::Ia32PerfGlobalOvfCtrl, 0);
 
-		__writemsr(static_cast<ULONG>(Msr::Ia32PMCx), 0);
+		UtilWriteMsr(Msr::Ia32PMCx, 0);
 
-		__writemsr(static_cast<ULONG>(Msr::Ia32DsArea), 0);
+		UtilWriteMsr(Msr::Ia32DsArea, 0);
 
 		g_IsUninit = TRUE;
 

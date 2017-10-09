@@ -413,6 +413,7 @@ enum class Msr : unsigned int {
 	Ia32PerfGlobalCtrl = 0x38F,	// allows software to enable/disable event counting of all or any combination of fixed - function PMCs(IA32_FIXED_CTRx) or any general - purpose PMCs via a single WRMSR.
 	Ia32PerfGlobalOvfCtrl = 0x390,  // allows software to clear counter overflow conditions on any combination of fixed - function PMCs or general - purpose PMCs via a single WRMSR.
 
+
 	//PMU PEBS Related
 	Ia32MiscEnable = 0x1A0,
 	Ia32PebsEnable = 0x3F1,
@@ -436,6 +437,8 @@ enum class Msr : unsigned int {
 	Ia32VmxTrueExitCtls = 0x48F,
 	Ia32VmxTrueEntryCtls = 0x490,
 	Ia32VmxVmfunc = 0x491,
+
+	Ia32x2ApivIvtPmi = 0x00000834,
 
 	Ia32Efer = 0xC0000080,
 	Ia32Star = 0xC0000081,
