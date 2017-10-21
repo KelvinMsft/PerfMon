@@ -122,7 +122,7 @@ extern "C"
 		PMU_DEBUG_INFO_LN_EX("[#BP : %d] cr3: %p pTrapFrame->Rip: %p R10: %I64x Rax: %I64X  sysycalladdr: %p ",
 			KeGetCurrentProcessorNumber(), __readcr3(), pTrapFrame->Rip, pTrapFrame->R10, pTrapFrame->Rax, __readmsr(static_cast<ULONG>(Msr::Ia32Lstar)));
 
-		*(PULONG64)(((PUCHAR)pTrapFrame->Rbp) + 0xE8) = 0;
+		//*(PULONG64)(((PUCHAR)pTrapFrame->Rbp) + 0xE8) = 0;
 
 	}	
 	//--------------------------------------------------------------//
@@ -135,31 +135,11 @@ extern "C"
 	//--------------------------------------------------------------//
 	VOID HandleSyscall(PKTRAP_FRAME pTrapFrame)
 	{
-		ULONG count = 0;
-		if (!GetHashIndexById(g_inst_table, 10000, pTrapFrame->Rip, &count))
+		if (pTrapFrame->R10 == (ULONG64)g_MyNtQuerySystemInformation)
 		{
-			PMU_DEBUG_INFO_LN_EX("[syscall/sysenter Cpu No. : %d] cr3: %p pTrapFrame->Rip: %p R10: %I64x Rax: %I64X  sysycalladdr: %p ",
-				KeGetCurrentProcessorNumber(), __readcr3(), pTrapFrame->Rip, pTrapFrame->R10, pTrapFrame->Rax, __readmsr(static_cast<ULONG>(Msr::Ia32Lstar)));
-			SetHash(g_inst_table, 10000, pTrapFrame->Rip, count++);
-		}
-		else
-		{
-			GetHashIndexById(g_inst_table, 10000, pTrapFrame->Rip, &count);
-			SetHash(g_inst_table, 10000, pTrapFrame->Rip, count++);
-			PMU_DEBUG_INFO_LN_EX("Rip: %p count : %x ", pTrapFrame->Rip, count);
-		}
-
-		if (((pTrapFrame->Rip & 0xFFF) == 0xC10) ||
-			((pTrapFrame->Rip & 0xFFF) == 0xEA2))
-		{
-
-			if (pTrapFrame->R10 == (ULONG64)g_MyNtQuerySystemInformation)
-			{
-				g_MyNtQuerySystemInformation = (pMyNtQuerySystemInformation)pTrapFrame->R10;
-				pTrapFrame->R10 = (ULONG64)MyNtQuerySystemInformation;
-				PMU_DEBUG_INFO_LN_EX("[Syscall exploting] NtQueryPerformanceCounter Hook %p ==> %p", g_MyNtQuerySystemInformation, pTrapFrame->R10);
-			}
-			PMU_DEBUG_INFO_LN_EX("[Syscall exploting] r10: %p g_MyNtQuerySystemInformation: %p Src: %x ", pTrapFrame->R10, g_MyNtQuerySystemInformation, (pTrapFrame->Rip & 0xFFF));
+			g_MyNtQuerySystemInformation = (pMyNtQuerySystemInformation)pTrapFrame->R10;
+			pTrapFrame->R10 = (ULONG64)MyNtQuerySystemInformation;
+			PMU_DEBUG_INFO_LN_EX("[Syscall exploting] NtQueryPerformanceCounter Hook %p ==> %p", g_MyNtQuerySystemInformation, pTrapFrame->R10);
 		}
 	}
 	//--------------------------------------------------------------//
@@ -206,7 +186,7 @@ extern "C"
 			break;
 		}
 		 
-		DisablePmi(); 
+	//	DisablePmi(); 
 
 		DispatchPmiEvent(pTrapFrame);
 		
@@ -227,7 +207,7 @@ extern "C"
 
 		UtilWriteMsr(Msr::Ia32PerfEvtseLx, PerfEvtSelx.all);
 
-		EnablePmi();
+	//	EnablePmi();
  
 		END_DO_WHILE
 

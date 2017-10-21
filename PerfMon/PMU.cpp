@@ -314,7 +314,9 @@ extern "C"
 			break;
 		case 3: 
 	
-			DisablePmi();
+		//	DisablePmi();
+
+			UtilWriteMsr(Msr::Ia32PerfEvtseLx, 0);
 
 			UtilWriteMsr(Msr::Ia32PMCx, (ULONG)0xFFFFFFFE);
 
@@ -332,7 +334,7 @@ extern "C"
 			PerfEvtSelx.fields.Pc = false;
 			UtilWriteMsr(Msr::Ia32PerfEvtseLx, PerfEvtSelx.all);
 			 
-			EnablePmi();
+		//	EnablePmi();
 		
 			PMU_DEBUG_INFO_LN_EX("Id: %x %d Done....", PerfEvtSelx.all, KeGetCurrentProcessorNumber());
 

@@ -1,9 +1,11 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 14
-VisualStudioVersion = 14.0.25420.1
+VisualStudioVersion = 14.0.25123.0
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "PerfMon", "PerfMon\PerfMon.vcxproj", "{F01C4412-F73C-4BD8-A954-84E2F3BD1251}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TestBp", "TestBp\TestBp.vcxproj", "{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -73,6 +75,34 @@ Global
 		{F01C4412-F73C-4BD8-A954-84E2F3BD1251}.Release|x86.ActiveCfg = Release|Win32
 		{F01C4412-F73C-4BD8-A954-84E2F3BD1251}.Release|x86.Build.0 = Release|Win32
 		{F01C4412-F73C-4BD8-A954-84E2F3BD1251}.Release|x86.Deploy.0 = Release|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug_WDK|ARM.ActiveCfg = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug_WDK|ARM.Build.0 = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug_WDK|ARM64.ActiveCfg = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug_WDK|ARM64.Build.0 = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug_WDK|x64.ActiveCfg = Debug|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug_WDK|x64.Build.0 = Debug|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug_WDK|x86.ActiveCfg = Debug|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug_WDK|x86.Build.0 = Debug|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug|ARM.ActiveCfg = Debug|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug|ARM64.ActiveCfg = Debug|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug|x64.ActiveCfg = Debug|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug|x64.Build.0 = Debug|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug|x86.ActiveCfg = Debug|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Debug|x86.Build.0 = Debug|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release_WDK|ARM.ActiveCfg = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release_WDK|ARM.Build.0 = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release_WDK|ARM64.ActiveCfg = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release_WDK|ARM64.Build.0 = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release_WDK|x64.ActiveCfg = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release_WDK|x64.Build.0 = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release_WDK|x86.ActiveCfg = Release|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release_WDK|x86.Build.0 = Release|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release|ARM.ActiveCfg = Release|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release|ARM64.ActiveCfg = Release|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release|x64.ActiveCfg = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release|x64.Build.0 = Release|x64
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release|x86.ActiveCfg = Release|Win32
+		{B4C142C1-5D8A-4C9A-8891-D8730C363B3A}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
