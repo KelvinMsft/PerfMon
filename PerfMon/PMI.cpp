@@ -50,11 +50,13 @@ extern "C"
 															// PKINTERRUPT pkPmiInterrupt = NULL;				// The PMI Interrupt Object (moved to intelpt.h)
 	}DRIVER_GLOBAL_DATA, *PDRIVER_GLOBAL_DATA;
 
+#pragma pack(push , 1)
 	typedef struct
 	{
 		UCHAR    FixCode[6];
-		ULONG64 JmpAddr;
+		ULONG64  JmpAddr;
 	}JMPCODE;
+#pragma pop()
 
 
 	//_SYSTEM_SERVICE_TABLE½á¹¹ÉùÃ÷  
@@ -81,6 +83,9 @@ extern "C"
 	ULONG_PTR					g_InterruptFuncTable[256] = { 0 };
 	PUCHAR			 			g_PrivateSsdtTable;
 	JMPCODE*					g_JmpCodeTable;
+	UCHAR						g_MyServiceSyscallTable[1024];
+	UCHAR						g_MyServiceParamTable[1024];
+	SYSTEM_SERVICE_TABLE*		g_MyServiceTableDescriptor;
 
 	///////////////////////////////////////////////////////////////////////
 	//// Marco
@@ -143,7 +148,12 @@ extern "C"
 		return (PCHAR)Table + Offset_U;
 	}
 
-	VOID BuildPrivateSyscallTable(SYSTEM_SERVICE_TABLE* ServiceTableDescriptor, SYSTEM_SERVICE_TABLE* PrivateServiceTable, JMPCODE* PrivateHookTable)
+	VOID BuildPrivateSyscallTable(
+		_In_  SYSTEM_SERVICE_TABLE* ServiceTableDescriptor,
+		_In_  PULONG				PrivateServiceTable,
+		_In_  UCHAR*				PrivateParamTable,
+		_Out_ SYSTEM_SERVICE_TABLE* PrivateSSDT,
+		_In_  JMPCODE*				PrivateHookTable)
 	{
 		int i = 0;
 		UCHAR FixCode[6] = { 0xFF , 0x25 , 0x00 , 0x00 , 0x00 , 0x00 };
@@ -151,29 +161,53 @@ extern "C"
 		PVOID ServciceAddr = NULL;
 		ULONG TestRealOffset = 0;
 		ULONG Offset = 0;
+
+		if (!ServiceTableDescriptor || !PrivateParamTable || !PrivateSSDT)
+		{
+			return; 
+		}
+
+		memcpy(PrivateParamTable, ServiceTableDescriptor->ParamTableBase, ServiceTableDescriptor->NumberOfServices);
+
 		for (i = 0; i < ServiceTableDescriptor->NumberOfServices; ++i)
 		{ 
-			ServciceAddr = GetSSDTProcAddress(ServiceTableDescriptor->ServiceTableBase, i, &ParamCount);
+			ServciceAddr   = GetSSDTProcAddress(ServiceTableDescriptor->ServiceTableBase, i, &ParamCount);
 			TestRealOffset = GetOffsetAddress((PULONG)ServiceTableDescriptor->ServiceTableBase, (ULONG64)ServciceAddr, (CHAR)ParamCount);
-			Offset = GetOffsetAddress((PULONG)PrivateServiceTable, (ULONG64)&PrivateHookTable[i], (CHAR)ParamCount);
+			Offset		   = GetOffsetAddress((PULONG)PrivateServiceTable, (ULONG64)&PrivateHookTable[i], (CHAR)ParamCount);
 
-			*(PULONG)&PrivateServiceTable[i] = Offset;
+			PrivateServiceTable[i] = Offset;
 			RtlCopyMemory(&PrivateHookTable[i].FixCode, FixCode, 6);
-			RtlCopyMemory(&PrivateHookTable[i].JmpAddr, &ServciceAddr, 8);
-			
-			PMU_DEBUG_INFO_LN_EX(" SSDT Proc: %p TestRealOffset: %x realoffset:%x MyOffset: %x g_PrivateSsdtTable: %p g_JmpCodeTable: %p",
+			PrivateHookTable[i].JmpAddr = (ULONG64)ServciceAddr;
+
+			PMU_DEBUG_INFO_LN_EX(" SSDT Proc: %p TestRealOffset: %x realoffset:%x MyOffset: %x g_PrivateSsdtTable: %p g_JmpCodeTable: %p ParamCount: %x HookTable: %p",
 				ServciceAddr,
 				TestRealOffset,
 				*(PULONG)((ULONG64)ServiceTableDescriptor->ServiceTableBase + i * 4),
 				Offset,
 				g_PrivateSsdtTable,
-				g_JmpCodeTable
+				g_JmpCodeTable,
+				PrivateParamTable[i],
+				PrivateHookTable
 			);
-		}
+		} 
+		 
+		PrivateSSDT->NumberOfServices		  = ServiceTableDescriptor->NumberOfServices;
+		PrivateSSDT->ServiceTableBase		  = PrivateServiceTable;
+		PrivateSSDT->ParamTableBase			  = PrivateParamTable;
+		PrivateSSDT->ServiceCounterTableBase  = NULL;
+
+
+		PMU_DEBUG_INFO_LN_EX("ServiceTable: %p ParamTableBase: %p NumOfService: %x ", 
+			PrivateSSDT->NumberOfServices,
+			PrivateSSDT->ServiceTableBase,
+			PrivateSSDT->ParamTableBase
+		);
+
 	}
 	//--------------------------------------------------------------//
 	VOID HandleSyscall(PKTRAP_FRAME pTrapFrame)
 	{
+		ULONG MyOffset = 0;
 		UCHAR FixCode[6] = { 0xFF , 0x25 , 0x00 , 0x00 , 0x00 , 0x00 };
 		/*
 		*
@@ -209,58 +243,86 @@ extern "C"
 		{
 			return;
 		}
+		
 
-		if (g_OrgSsdtOffset)
-		{
-			PMU_DEBUG_INFO_LN_EX("Processor: %d Irql: %d NtCreateFile: Rip: %p", KeGetCurrentProcessorNumber(), KeGetCurrentIrql(), pTrapFrame->Rip);
-			PMU_DEBUG_INFO_LN_EX("Everytime i wanna hook by g_ShellCode: %p :) ", g_ShellCode);
-			pTrapFrame->Rip = (ULONG64)g_ShellCode;
-			return;
-		}
- 
-		RtlMoveMemory(g_ShellCode, (PUCHAR)pTrapFrame->Rip, 40);
-		for (int i = 0; i < 40; i++)
+		RtlZeroMemory(g_ShellCode, PAGE_SIZE);
+
+		ULONG64 RetAddr = pTrapFrame->Rip + 33;
+		RtlMoveMemory(g_ShellCode, (PUCHAR)pTrapFrame->Rip, 33); 
+		RtlCopyMemory(g_ShellCode + 33, FixCode, 6);
+		RtlCopyMemory(g_ShellCode + 39, &RetAddr, 8); 
+
+		for (int i = 0; i < 33; i++)
 		{
 			SYSTEM_SERVICE_TABLE* Ssdt = NULL;
-			PMU_COMMON_DEBUG_INFO("%X", g_ShellCode[i]);
 			if (g_ShellCode[i] == 0x4C && g_ShellCode[i + 1] == 0x8D && g_ShellCode[i + 2] == 0x15)
-			{ 
-				g_OrgSsdtOffset = *(PULONG)&g_ShellCode[i + 3];
-				
+			{
 				if (!g_OrgSsdtOffset)
 				{
-					break;
+					g_OrgSsdtOffset = *(PULONG)&g_ShellCode[i + 3]; 
+					g_OrgSsdtOffset = (g_OrgSsdtOffset + pTrapFrame->Rip + i + 7);
 				}
-
-				Ssdt = (SYSTEM_SERVICE_TABLE*)(g_OrgSsdtOffset + pTrapFrame->Rip + i + 7);
+				
+				Ssdt = (SYSTEM_SERVICE_TABLE*)g_OrgSsdtOffset;
 
 				PMU_DEBUG_INFO_LN_EX(" NumberOfServices: %I64x Base: %I64x ", Ssdt->NumberOfServices, Ssdt->ServiceTableBase);
 
-				g_PrivateSsdtTable = (PUCHAR)ExAllocatePoolWithTag(NonPagedPool, (Ssdt->NumberOfServices * sizeof(JMPCODE)) + (Ssdt->NumberOfServices * sizeof(ULONG)), 'PSSD');
 				if (!g_PrivateSsdtTable)
 				{
-					break;
+					g_PrivateSsdtTable = (PUCHAR)ExAllocatePoolWithTag(NonPagedPool, (Ssdt->NumberOfServices * sizeof(JMPCODE)) + (Ssdt->NumberOfServices * sizeof(ULONG)), 'PSSD');
+					g_JmpCodeTable = (JMPCODE*)(g_PrivateSsdtTable + (Ssdt->NumberOfServices * sizeof(ULONG))); 
+					if (g_PrivateSsdtTable)
+					{
+						RtlZeroMemory((void *)g_PrivateSsdtTable, (Ssdt->NumberOfServices * sizeof(JMPCODE)) + (Ssdt->NumberOfServices * sizeof(ULONG)));
+						
+						BuildPrivateSyscallTable(Ssdt, (PULONG)g_PrivateSsdtTable, g_MyServiceParamTable, g_MyServiceTableDescriptor, (JMPCODE*)g_JmpCodeTable); 
+					}
+					else
+					{
+						PMU_DEBUG_INFO_LN_EX("Break;;;;;;");
+						break;
+					}
 				}
-
-				RtlZeroMemory((void *)g_PrivateSsdtTable,  (Ssdt->NumberOfServices * sizeof(JMPCODE)) + (Ssdt->NumberOfServices * sizeof(ULONG))); 
-
-				g_JmpCodeTable = (JMPCODE*)(g_PrivateSsdtTable + (Ssdt->NumberOfServices * sizeof(ULONG)));
+					 
+			  
+				MyOffset = (ULONG)(((ULONG64)g_MyServiceTableDescriptor & 0xFFFFFFFF) - ((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF) - 7);
+				PMU_DEBUG_INFO_LN_EX("[Calc2]g_MyServiceTableDescriptor: %p g_ShellCode: %p Result: %x ", g_MyServiceTableDescriptor, &g_ShellCode[i], MyOffset);
+				PMU_DEBUG_INFO_LN_EX("[Calc2]Verification Result: %p ",(ULONG) (((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF) + MyOffset  + 7));
+			 
+				*(PULONG)&g_ShellCode[i + 3] = MyOffset;
+			
+				/*
+				for (i = 0; i < 54; i++)
+				{
+					PMU_DEBUG_INFO_LN_EX("Byte: %X", g_ShellCode[i]);
+				}
+			   */
 				 
-				BuildPrivateSyscallTable(Ssdt,(SYSTEM_SERVICE_TABLE*)g_PrivateSsdtTable,  (JMPCODE*)g_JmpCodeTable);
+				//PMU_DEBUG_INFO_LN_EX("Get My SSDT : %x addr: %p offset: %p  g_MyServiceTableDescriptor: %p ", MyOffset , (ULONG64)&g_ShellCode[i] , (ULONG64)&g_ShellCode[i]+ MyOffset +7, g_MyServiceTableDescriptor);
+				
 
-				g_OrgSsdtOffset = pTrapFrame->Rip + g_OrgSsdtOffset + 7;
-				ULONG64 RetAddr = pTrapFrame->Rip + 40;
-				RtlCopyMemory((char *)g_ShellCode + 40, FixCode, 6);
-				RtlCopyMemory((char *)g_ShellCode + 46, &RetAddr , 8);   
+				SYSTEM_SERVICE_TABLE* SyscallTest = (SYSTEM_SERVICE_TABLE*)(((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF00000000) + ((ULONG)(((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF) + MyOffset + 7)));
 
-				pTrapFrame->Rip  = (ULONG64)g_ShellCode;  
 
-				break;
-			}
-		}
-		PMU_DEBUG_INFO_LN_EX("");
-		PMU_DEBUG_INFO_LN_EX("g_OrgSsdtOffset: %p g_OrgSssdtOffset: %p", g_OrgSsdtOffset, g_OrgSssdtOffset);   
+//				PULONG base = (PULONG)SyscallTest->ServiceTableBase;
+				PMU_DEBUG_INFO_LN_EX("[FakeCallTable]SyscallTest:  %p g_MyServiceTableDescriptor: %p", SyscallTest, g_MyServiceTableDescriptor);
+				PMU_DEBUG_INFO_LN_EX("[FakeCallTable]Num: %x Base: %p CountBase: %p", SyscallTest->NumberOfServices, SyscallTest->ServiceTableBase, SyscallTest->ParamTableBase);
 
+				//PMU_DEBUG_INFO_LN_EX("[FakeCallTable2]Num: %x Base: %p CountBase: %p", g_MyServiceTableDescriptor->NumberOfServices, g_MyServiceTableDescriptor->ServiceTableBase, g_MyServiceTableDescriptor->ParamTableBase);
+				
+				 
+				for (i = 0; i < 50 ; i++) {
+					ULONG Count = 0;
+					PVOID Addr = GetSSDTProcAddress(SyscallTest->ServiceTableBase, i, &Count);
+					PMU_DEBUG_INFO_LN_EX("[FakeCallTable3] %p %p ", Addr, &g_JmpCodeTable[i]);
+				 
+				}
+				
+				 
+				//pTrapFrame->Rip = (ULONG64)g_ShellCode;
+
+			} 
+		} 
 		return;
 	}
 	//--------------------------------------------------------------//
@@ -311,7 +373,9 @@ extern "C"
 		g_FakeSsdt = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE * 20, 'ssdt');
 		g_FakeSSsdt = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE * 20, 'dsdt');
 		g_ShellCode = (PUCHAR)ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, 'cdee');
+		g_MyServiceTableDescriptor = (SYSTEM_SERVICE_TABLE*)ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, 'stdt');
 
+		RtlZeroMemory(g_MyServiceTableDescriptor, PAGE_SIZE);
 		RtlZeroMemory(g_FakeSsdt, PAGE_SIZE *20);
 		RtlZeroMemory(g_FakeSSsdt, PAGE_SIZE*20);
 		RtlZeroMemory(g_ShellCode, PAGE_SIZE);
