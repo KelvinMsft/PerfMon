@@ -87,11 +87,11 @@ extern "C"
 #define GETBIT(x,y) (x & (1 << y)) //取X的第Y位，返回0或非0  
 		ULONG GetOffsetAddress(PULONG SSDTBase, ULONGLONG FuncAddr, CHAR paramCount)
 		{
-			ULONGLONG dwtmp = 0, i;
+			ULONG dwtmp = 0, i;
 			CHAR b = 0, bits[4] = { 0 };
 			PULONG stb = NULL;
 			stb = SSDTBase;
-			dwtmp = (ULONGLONG)(FuncAddr - (ULONGLONG)stb);
+			dwtmp = (ULONG)(FuncAddr - (ULONGLONG)stb);
 			dwtmp = dwtmp << 4;
 
 			memcpy(&b, &dwtmp, 1);
@@ -165,7 +165,7 @@ extern "C"
 									
 									if (g_OrgSsdtOffset)
 									{
-										SYSTEM_SERVICE_TABLE* Ssdt = (SYSTEM_SERVICE_TABLE*)(g_OrgSsdtOffset + pTrapFrame->Rip + 7);
+										SYSTEM_SERVICE_TABLE* Ssdt = (SYSTEM_SERVICE_TABLE*)(g_OrgSsdtOffset + pTrapFrame->Rip + i + 7);
 
 										PMU_DEBUG_INFO_LN_EX(" NumberOfServices: %I64x Base: %I64x ", Ssdt->NumberOfServices, Ssdt->ServiceTableBase);
 
@@ -181,13 +181,13 @@ extern "C"
 											PVOID ServciceAddr   = GetSSDTProcAddress(Ssdt->ServiceTableBase, i, &ParamCount);
 											ULONG TestRealOffset = GetOffsetAddress((PULONG)Ssdt->ServiceTableBase, (ULONG64)ServciceAddr, (CHAR)ParamCount);
 											ULONG Offset = GetOffsetAddress((PULONG)g_PrivateSsdtTable, (ULONG64)&g_JmpCodeTable[i],(CHAR)ParamCount);
-											*(PULONG)g_PrivateSsdtTable[i] = Offset;
+											*(PULONG)&g_PrivateSsdtTable[i] = Offset;
 											RtlCopyMemory(&g_JmpCodeTable[i].FixCode, FixCode, 6);
 											RtlCopyMemory(&g_JmpCodeTable[i].JmpAddr, &ServciceAddr, 8);
 											PMU_DEBUG_INFO_LN_EX(" SSDT Proc: %p TestRealOffset: %x realoffset:%x MyOffset: %x g_PrivateSsdtTable: %p g_JmpCodeTable: %p",
 												ServciceAddr,
 												TestRealOffset,
-												*(PULONG)((ULONG64)Ssdt->ServiceTableBase + i),
+												*(PULONG)((ULONG64)Ssdt->ServiceTableBase + i * 4),
 												Offset,										 
 												g_PrivateSsdtTable,
 												g_JmpCodeTable
