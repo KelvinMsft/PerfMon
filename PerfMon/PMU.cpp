@@ -314,14 +314,14 @@ extern "C"
 			break;
 		case 3: 
 	
-		//	DisablePmi();
+			DisablePmi();
 
 			UtilWriteMsr(Msr::Ia32PerfEvtseLx, 0);
 
 			UtilWriteMsr(Msr::Ia32PMCx, (ULONG)0xFFFFFFFE);
 
 			MSR_IA32_PERFEVTSELX_VERSION3 PerfEvtSelx = { 0 };
-			PerfEvtSelx.fields.Usr = true;						//in case you want intercept user mode instruction...
+			PerfEvtSelx.fields.Usr = false;						//in case you want intercept user mode instruction...
 			PerfEvtSelx.fields.Os = true;
 			PerfEvtSelx.fields.E = false;
 			PerfEvtSelx.fields.Int = true;
@@ -333,8 +333,8 @@ extern "C"
 			PerfEvtSelx.fields.Inv = false;
 			PerfEvtSelx.fields.Pc = false;
 			UtilWriteMsr(Msr::Ia32PerfEvtseLx, PerfEvtSelx.all);
-			 
-		//	EnablePmi();
+		 
+			EnablePmi();
 		
 			PMU_DEBUG_INFO_LN_EX("Id: %x %d Done....", PerfEvtSelx.all, KeGetCurrentProcessorNumber());
 
