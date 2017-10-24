@@ -209,6 +209,7 @@ extern "C"
 	{
 		ULONG MyOffset = 0;
 		UCHAR FixCode[6] = { 0xFF , 0x25 , 0x00 , 0x00 , 0x00 , 0x00 };
+		UCHAR Signature[6] = { 0x89 , 0x83, 0xF8 , 0x01 , 0x00 ,0x00 };
 		/*
 		*
 			.text:000000014006EA90 FB                                      sti
@@ -234,16 +235,26 @@ extern "C"
 		{
 			return;
 		}
-		if ((pTrapFrame->Rip & 0xFFF) != 0xA98)
-		{
-			return;
-		}
 
+		for (int k = 0; k < 6; k++)
+		{
+			if (((PUCHAR)pTrapFrame->Rip)[k] != Signature[k])
+			{
+				return;
+			} 
+		}
+	 
 		if (!g_ShellCode)
 		{
 			return;
 		}
 		
+		if (g_PrivateSsdtTable)
+		{ 
+			PMU_DEBUG_INFO_LN_EX("Hook everything");
+			pTrapFrame->Rip = (ULONG64)g_ShellCode; 
+			return; 
+		}
 
 		RtlZeroMemory(g_ShellCode, PAGE_SIZE);
 
@@ -301,25 +312,29 @@ extern "C"
 				//PMU_DEBUG_INFO_LN_EX("Get My SSDT : %x addr: %p offset: %p  g_MyServiceTableDescriptor: %p ", MyOffset , (ULONG64)&g_ShellCode[i] , (ULONG64)&g_ShellCode[i]+ MyOffset +7, g_MyServiceTableDescriptor);
 				
 
-				SYSTEM_SERVICE_TABLE* SyscallTest = (SYSTEM_SERVICE_TABLE*)(((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF00000000) + ((ULONG)(((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF) + MyOffset + 7)));
+//				SYSTEM_SERVICE_TABLE* SyscallTest = (SYSTEM_SERVICE_TABLE*)(((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF00000000) + ((ULONG)(((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF) + MyOffset + 7)));
 
 
-//				PULONG base = (PULONG)SyscallTest->ServiceTableBase;
-				PMU_DEBUG_INFO_LN_EX("[FakeCallTable]SyscallTest:  %p g_MyServiceTableDescriptor: %p", SyscallTest, g_MyServiceTableDescriptor);
-				PMU_DEBUG_INFO_LN_EX("[FakeCallTable]Num: %x Base: %p CountBase: %p", SyscallTest->NumberOfServices, SyscallTest->ServiceTableBase, SyscallTest->ParamTableBase);
+//				//PULONG base = (PULONG)SyscallTest->ServiceTableBase;
+				//PMU_DEBUG_INFO_LN_EX("[FakeCallTable]SyscallTest:  %p g_MyServiceTableDescriptor: %p", SyscallTest, g_MyServiceTableDescriptor);
+				//PMU_DEBUG_INFO_LN_EX("[FakeCallTable]Num: %x Base: %p CountBase: %p", SyscallTest->NumberOfServices, SyscallTest->ServiceTableBase, SyscallTest->ParamTableBase);
 
 				//PMU_DEBUG_INFO_LN_EX("[FakeCallTable2]Num: %x Base: %p CountBase: %p", g_MyServiceTableDescriptor->NumberOfServices, g_MyServiceTableDescriptor->ServiceTableBase, g_MyServiceTableDescriptor->ParamTableBase);
 				
 				 
 				for (i = 0; i < 50 ; i++) {
-					ULONG Count = 0;
-					PVOID Addr = GetSSDTProcAddress(SyscallTest->ServiceTableBase, i, &Count);
-					PMU_DEBUG_INFO_LN_EX("[FakeCallTable3] %p %p ", Addr, &g_JmpCodeTable[i]);
+//					ULONG Count = 0;
+//					PVOID Addr = GetSSDTProcAddress(SyscallTest->ServiceTableBase, i, &Count);
+				//	PMU_DEBUG_INFO_LN_EX("[FakeCallTable3] %p %p ", Addr, &g_JmpCodeTable[i]);
+					for (int j = 0; j < 20; j++)
+					{
+					//	PMU_DEBUG_INFO_LN_EX("[FakeCallTable3]Processor: %d Bytes %X ", KeGetCurrentProcessorNumber() ,  ((PUCHAR)Addr)[j]);
+					}
 				 
 				}
-				
+				PMU_DEBUG_INFO_LN_EX("g_ShellCode: %X ", g_ShellCode);
 				 
-				//pTrapFrame->Rip = (ULONG64)g_ShellCode;
+				 pTrapFrame->Rip = (ULONG64)g_ShellCode;
 
 			} 
 		} 
