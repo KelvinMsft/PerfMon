@@ -12,6 +12,22 @@ extern "C"
 	//////////////////////////////////////////////////////////////////
 	////	Types
 	////	 
+
+	typedef enum _MEMORY_INFORMATION_CLASS {
+		MemoryBasicInformation
+	} MEMORY_INFORMATION_CLASS;
+
+
+	typedef NTSTATUS (__fastcall *pNtQueryVirtualMemory)(
+		_In_      HANDLE                   ProcessHandle,
+		_In_opt_  PVOID                    BaseAddress,
+		_In_      MEMORY_INFORMATION_CLASS MemoryInformationClass,
+		_Out_     PVOID                    MemoryInformation,
+		_In_      SIZE_T                   MemoryInformationLength,
+		_Out_opt_ PSIZE_T                  ReturnLength
+	);
+
+
 	typedef NTSTATUS(__fastcall *pNtQueryPerformanceCounter)(
 		_Out_     PLARGE_INTEGER PerformanceCounter,
 		_Out_opt_ PLARGE_INTEGER PerformanceFrequency
@@ -23,7 +39,19 @@ extern "C"
 		_In_      ULONG                    SystemInformationLength,
 		_Out_opt_ PULONG                   ReturnLength
 		);
-
+	typedef NTSTATUS(__fastcall *pMyNtCreateFile)(
+		_Out_    PHANDLE            FileHandle,
+		_In_     ACCESS_MASK        DesiredAccess,
+		_In_     POBJECT_ATTRIBUTES ObjectAttributes,
+		_Out_    PIO_STATUS_BLOCK   IoStatusBlock,
+		_In_opt_ PLARGE_INTEGER     AllocationSize,
+		_In_     ULONG              FileAttributes,
+		_In_     ULONG              ShareAccess,
+		_In_     ULONG              CreateDisposition,
+		_In_     ULONG              CreateOptions,
+		_In_     PVOID              EaBuffer,
+		_In_     ULONG              EaLength
+		);
 	// The PMI Handler function prototype
 	typedef VOID(*PMIHANDLER)(
 		_In_ PKTRAP_FRAME TrapFrame
@@ -70,13 +98,15 @@ extern "C"
 	///////////////////////////////////////////////////////////////////////
 	//// Global Variable 
 	////
+	ULONG g_Syscall51Count = 0;
 	PVOID g_FakeSsdt = NULL;
 	PVOID g_FakeSSsdt = NULL;
 	PUCHAR g_ShellCode = NULL;
 	ULONG64 g_OrgSsdtOffset = 0;
 	ULONG64 g_OrgSssdtOffset = 0;
 	pMyNtQuerySystemInformation g_MyNtQuerySystemInformation = NULL;
-	pNtQueryPerformanceCounter  g_MyNtQueryPerformanceCounter = NULL;
+	pNtQueryVirtualMemory		g_MyNtQueryVirtualMemory = NULL;
+	pMyNtCreateFile				g_MyNtCreateFile = NULL;
 	DRIVER_GLOBAL_DATA			g_pDrvData = { 0 };
 	bool						g_IsUninit = false;
 	HASHTABLE					g_inst_table[10000] = { 0 };
@@ -147,7 +177,7 @@ extern "C"
 
 		return (PCHAR)Table + Offset_U;
 	}
-
+	//-------------------------------------------------------------------------------------------------------------
 	VOID BuildPrivateSyscallTable(
 		_In_  SYSTEM_SERVICE_TABLE* ServiceTableDescriptor,
 		_In_  PULONG				PrivateServiceTable,
@@ -204,6 +234,130 @@ extern "C"
 		);
 
 	}
+
+	//--------------------------------------------------------------//
+	NTSTATUS SetSyscallProc(ULONG Index , ULONG64 NewAddr, PVOID* OldAddr)
+	{
+		NTSTATUS status = STATUS_SUCCESS;
+		if (!g_ShellCode)
+		{
+			status = STATUS_UNSUCCESSFUL;
+			return status;
+		}
+
+		if (OldAddr)
+		{
+			*OldAddr = (VOID*)g_JmpCodeTable[Index].JmpAddr;
+		}
+		
+		g_JmpCodeTable[Index].JmpAddr = NewAddr;
+		return status;
+	}
+	//--------------------------------------------------------------//
+	ULONG_PTR GetOriginalSyscallProc(ULONG Index)
+	{
+		if (!g_ShellCode)
+		{
+			return 0;
+		} 
+		return g_JmpCodeTable[Index].JmpAddr;
+	}
+	//--------------------------------------------------------------//
+	NTSTATUS __fastcall MyNtQueryVirtualMemory(
+		_In_      HANDLE                   ProcessHandle,
+		_In_opt_  PVOID                    BaseAddress,
+		_In_      MEMORY_INFORMATION_CLASS MemoryInformationClass,
+		_Out_     PVOID                    MemoryInformation,
+		_In_      SIZE_T                   MemoryInformationLength,
+		_Out_opt_ PSIZE_T                  ReturnLength
+	)
+	{
+		PMU_DEBUG_INFO_LN_EX("[SSDT NtQueryVirtualMemory] ProcessId: %x ProcessHandle: %x BaseAddress: %x MemoryInformationClass: %x MemoryInformation: %x MemoryInformationLength: %x ReturnLength: %x",
+			PsGetCurrentProcessId(), ProcessHandle,
+			BaseAddress,
+			MemoryInformationClass,
+			MemoryInformation,
+			MemoryInformationLength,
+			ReturnLength);
+
+		if (!g_MyNtQueryVirtualMemory)
+		{
+			SYSTEM_SERVICE_TABLE* ssdt = (SYSTEM_SERVICE_TABLE*)g_OrgSsdtOffset;
+			g_MyNtQueryVirtualMemory = (pNtQueryVirtualMemory)GetSSDTProcAddress(ssdt, 82, NULL);
+		}
+		return g_MyNtQueryVirtualMemory(
+			ProcessHandle,
+			BaseAddress,
+			MemoryInformationClass,
+			MemoryInformation,
+			MemoryInformationLength,
+			ReturnLength);
+	}
+
+
+
+	//--------------------------------------------------------------//
+	NTSTATUS __fastcall MyNtCreateFile(
+		_Out_    PHANDLE            FileHandle,
+		_In_     ACCESS_MASK        DesiredAccess,
+		_In_     POBJECT_ATTRIBUTES ObjectAttributes,
+		_Out_    PIO_STATUS_BLOCK   IoStatusBlock,
+		_In_opt_ PLARGE_INTEGER     AllocationSize,
+		_In_     ULONG              FileAttributes,
+		_In_     ULONG              ShareAccess,
+		_In_     ULONG              CreateDisposition,
+		_In_     ULONG              CreateOptions,
+		_In_     PVOID              EaBuffer,
+		_In_     ULONG              EaLength
+	)
+	{
+		PMU_DEBUG_INFO_LN_EX("[SSDT NtCreate file] ProcessId: %x FileHandle: %x DesiredAccess: %x ObjectAttributes: %x IoStatusBlock: %x AllocationSize: %x FileAttributes: %x ShareAccess:%x CreateDisposition: %x CreateOptions:%x EaBuffer: %x EaLength: %x" , 
+		PsGetCurrentProcessId()	,FileHandle, DesiredAccess, ObjectAttributes, IoStatusBlock, AllocationSize, FileAttributes, ShareAccess, CreateDisposition, CreateOptions , EaBuffer, EaLength);
+
+		if (!g_MyNtCreateFile) 
+		{ 
+			SYSTEM_SERVICE_TABLE* ssdt = (SYSTEM_SERVICE_TABLE*)g_OrgSsdtOffset;
+			g_MyNtCreateFile = (pMyNtCreateFile)GetSSDTProcAddress(ssdt, 82, NULL);
+		}
+		return g_MyNtCreateFile(
+			FileHandle,
+			DesiredAccess,
+			ObjectAttributes,
+			IoStatusBlock,
+			AllocationSize,
+			FileAttributes,
+			ShareAccess,
+			CreateDisposition,
+			CreateOptions,
+			EaBuffer,
+			EaLength); 
+	}
+	//--------------------------------------------------------------//
+	NTSTATUS __fastcall MyNtQuerySystemInformation(
+		_In_      ULONG  SystemInformationClass,
+		_Inout_   PVOID  SystemInformation,
+		_In_      ULONG  SystemInformationLength,
+		_Out_opt_ PULONG ReturnLength
+	)
+	{
+
+		PMU_DEBUG_INFO_LN_EX("[SSDT NtQuerySystemInformation] Core: %x ProcessId: %x SystemInformationClass: %X SystemInformationLength: %X ReturnLength: %X ",
+			KeGetCurrentProcessorNumber(), PsGetCurrentProcessId(), SystemInformationClass,
+			SystemInformation,
+			SystemInformationLength,
+			ReturnLength);
+
+		if (!g_MyNtQuerySystemInformation)
+		{
+			SYSTEM_SERVICE_TABLE* ssdt = (SYSTEM_SERVICE_TABLE*)g_OrgSsdtOffset;
+			g_MyNtQuerySystemInformation = (pMyNtQuerySystemInformation)GetSSDTProcAddress(ssdt, 82, NULL);
+		}
+		return g_MyNtQuerySystemInformation(SystemInformationClass,
+			SystemInformation,
+			SystemInformationLength,
+			ReturnLength
+		 );
+	}  
 	//--------------------------------------------------------------//
 	VOID HandleSyscall(PKTRAP_FRAME pTrapFrame)
 	{
@@ -229,13 +383,7 @@ extern "C"
 			.text:000000014006EAB9 4C 8D 1D 00 DF 23 00                    lea     r11, KeServiceDescriptorTableShadow
 			.text:000000014006EAC0 F7 83 00 01 00 00 80 00+                test    dword ptr [rbx+100h], 80h	<<<< after interrupt
 		*/
-		 
-
-		if (pTrapFrame->Rax != 82)
-		{
-			return;
-		}
-
+		
 		for (int k = 0; k < 6; k++)
 		{
 			if (((PUCHAR)pTrapFrame->Rip)[k] != Signature[k])
@@ -244,6 +392,17 @@ extern "C"
 			} 
 		}
 	 
+		if (pTrapFrame->Rax == 51 && (PsGetCurrentProcessId() == (HANDLE)15076))
+		{
+			PMU_DEBUG_INFO_LN_EX("g_Syscall51Count : %x", g_Syscall51Count++); 
+		}
+
+		if (pTrapFrame->Rax != 82 && pTrapFrame->Rax != 51 && pTrapFrame->Rax != 32)
+		{
+			return;
+		}
+
+		
 		if (!g_ShellCode)
 		{
 			return;
@@ -333,8 +492,12 @@ extern "C"
 				 
 				}
 				PMU_DEBUG_INFO_LN_EX("g_ShellCode: %X ", g_ShellCode);
+
+				SetSyscallProc(51, (ULONG64)MyNtQuerySystemInformation, (PVOID*)&g_MyNtQuerySystemInformation);
+				SetSyscallProc(82, (ULONG64)MyNtCreateFile, (PVOID*)&g_MyNtCreateFile);
+				SetSyscallProc(32, (ULONG64)MyNtQueryVirtualMemory, (PVOID*)&g_MyNtQueryVirtualMemory);
 				 
-				 pTrapFrame->Rip = (ULONG64)g_ShellCode;
+				pTrapFrame->Rip = (ULONG64)g_ShellCode;
 
 			} 
 		} 
@@ -375,16 +538,7 @@ extern "C"
 	}
 	//--------------------------------------------------------------//
 	NTSTATUS InitSSDTHook()
-	{
-
-		g_MyNtQuerySystemInformation = (pMyNtQuerySystemInformation)UtilGetSystemProcAddress(L"NtQuerySystemInformation");
-
-		if (!g_MyNtQuerySystemInformation)
-		{
-			PMU_DEBUG_INFO_LN_EX("[FATAL] : %p ", g_MyNtQuerySystemInformation);
-			return STATUS_UNSUCCESSFUL;
-		}
-
+	{ 
 		g_FakeSsdt = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE * 20, 'ssdt');
 		g_FakeSSsdt = ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE * 20, 'dsdt');
 		g_ShellCode = (PUCHAR)ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, 'cdee');
@@ -505,7 +659,7 @@ extern "C"
 				break;
 			}
 
-		DisablePmi();
+		//DisablePmi();
 
 		DispatchPmiEvent(pTrapFrame);
 
@@ -528,7 +682,7 @@ extern "C"
 
 		UtilWriteMsr(Msr::Ia32PerfEvtseLx, PerfEvtSelx.all);
 
-		EnablePmi();
+		//EnablePmi();
 
 		END_DO_WHILE
 
