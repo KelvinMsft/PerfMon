@@ -17,30 +17,35 @@ typedef NTSTATUS(__fastcall *pNtQueryVirtualMemory)(
 	_Out_opt_ PSIZE_T                  ReturnLength
 	);
 
-pNtQueryVirtualMemory pfn;
+pMyNtQuerySystemInformation pfn;
 
 int main() 
-{ 
-	while (true) {
+{ 	
+	pfn = (pMyNtQuerySystemInformation)GetProcAddress(LoadLibrary(L"ntdll.dll"), "NtQuerySystemInformation");
+	if (!pfn)
+	{
+		printf("error getting func addr");
+		
+	}
+
+	while (true) 
+	{
 		system("pause");
-		for (int i = 0; i < 100; i++)
+		for (int i = 0; i < 10000; i++)
 		{
 			__try
 			{
-				pfn = (pNtQueryVirtualMemory)GetProcAddress(LoadLibrary(L"ntdll.dll"), "NtQueryVirtualMemory");
-				if (!pfn)
-				{
-					printf("error getting func addr");
-					break;
-				}
-				printf("[i: %x] return: %x \r\n", i, pfn(0 , 0, 0, 0, 0,0));
-				 
+			
+				printf("[i: %x] return: %x \r\n", i, pfn(0x4567 , 0, 0, 0));
+				
+			//	DebugBreak();
 			}
 			__except (1)
 			{
 
 			}
-		}
+		} 
+		pfn(0x4568, 0, 0, 0);
 	}
 	system("pause");
 	return 0;

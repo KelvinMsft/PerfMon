@@ -63,12 +63,12 @@ extern "C"
 		}
 
 		if (pTrapFrame->Rip >= g_InterruptFuncTable[0xE] && pTrapFrame->Rip <= g_InterruptFuncTable[0xE] + 1000)
-		{
-			//	HandlePageFault(pTrapFrame);
+		{ 
 		}
 
 		if (pTrapFrame->Rip >= g_InterruptFuncTable[0x3] && pTrapFrame->Rip <= g_InterruptFuncTable[0x3] + 1000)
 		{
+			PMU_DEBUG_INFO_LN_EX("breakpoint: %p ", pTrapFrame->Rip);
 			//	HandleBreakpointTrap(pTrapFrame);
 		}
 
@@ -77,10 +77,12 @@ extern "C"
 			//	HandleGeneralProtectException(pTrapFrame);
 		}
 
+	 
 		if (pTrapFrame->Rip >= SystemCall64 && pTrapFrame->Rip <= SystemCall64 + 1400)
-		{
+		{ 
 			HandleSyscall(pTrapFrame);
 		}
+
 
 		return status;
 	} 
@@ -215,6 +217,8 @@ extern "C"
 
 		UtilWriteMsr(Msr::Ia32PerfEvtseLx, PerfEvtSelx.all);
 
+
+		UtilWriteMsr(Msr::Ia32PerfGlobalOvfCtrl, 0x1);
 		//EnablePmi();
 
 		END_DO_WHILE

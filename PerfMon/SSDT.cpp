@@ -77,6 +77,13 @@ extern "C" {
 		_In_      SIZE_T                   MemoryInformationLength,
 		_Out_opt_ PSIZE_T                  ReturnLength
 	);
+
+	typedef struct _KeShadowTable
+	{
+		SYSTEM_SERVICE_TABLE NtKernel;
+		SYSTEM_SERVICE_TABLE Win32k;
+	}TKeShadowTable, *PKeShadowTable;
+
 	///////////////////////////////////////////////////////////////////////
 	//// Marco
 	//// 
@@ -91,21 +98,28 @@ extern "C" {
 	///////////////////////////////////////////////////////////////////////
 	//// Global Variable 
 	////
-
+	ULONG						g_SyscallQueryCount = 0;
 	ULONG						g_Syscall51Count = 0;
 	PVOID						g_FakeSsdt = NULL;
 	PVOID						g_FakeSSsdt = NULL;
 	PUCHAR						g_ShellCode = NULL;
 	ULONG64						g_OrgSsdt = 0;
+	ULONG64						g_OrgSSsdt = 0;
 	ULONG64						g_OrgSssdtOffset = 0;
 	pMyNtQuerySystemInformation g_MyNtQuerySystemInformation = NULL;
 	pNtQueryVirtualMemory		g_MyNtQueryVirtualMemory = NULL;
 	pMyNtCreateFile				g_MyNtCreateFile = NULL;
 	PUCHAR			 			g_PrivateSsdtTable;
+	PUCHAR			 			g_PrivateSSsdtTable;
 	JMPCODE*					g_JmpCodeTable;
+	JMPCODE*					g_ShadowJmpCodeTable;
 	UCHAR						g_MyServiceSyscallTable[1024];
 	UCHAR						g_MyServiceParamTable[1024];
+	UCHAR						g_MyShadowServiceParamTable[1024];
 	SYSTEM_SERVICE_TABLE*		g_MyServiceTableDescriptor;
+
+
+	TKeShadowTable*				g_MyShadowServiceTableDescriptor;
 	BOOLEAN						g_IsInit = FALSE;
 
 	
@@ -215,6 +229,19 @@ extern "C" {
 			SystemInformationLength,
 			ReturnLength);
 
+
+		if (SystemInformationClass == 0x4568)
+		{
+			PMU_DEBUG_INFO_LN_EX("@@@call count : %u Total: %u", g_SyscallQueryCount , g_Syscall51Count);
+			g_SyscallQueryCount = 0;
+		}
+
+		if (SystemInformationClass == 0x4567)
+		{
+			g_SyscallQueryCount++;
+			return 0x5678;
+		}
+
 		if (!g_MyNtQuerySystemInformation)
 		{
 			SYSTEM_SERVICE_TABLE* ssdt = (SYSTEM_SERVICE_TABLE*)g_OrgSsdt;
@@ -234,6 +261,7 @@ extern "C" {
 		_Out_ SYSTEM_SERVICE_TABLE* PrivateSSDT,
 		_In_  JMPCODE*				PrivateHookTable)
 	{
+
 		int i = 0;
 		UCHAR FixCode[6] = { 0xFF , 0x25 , 0x00 , 0x00 , 0x00 , 0x00 };
 		ULONG ParamCount = 0;
@@ -246,8 +274,20 @@ extern "C" {
 			return;
 		}
 
+
 		memcpy(PrivateParamTable, ServiceTableDescriptor->ParamTableBase, ServiceTableDescriptor->NumberOfServices);
 
+		//Service table
+					/*----------
+			  	----- |	Offset |
+			----|---- | Offset |
+			|	|	  |  ....  |
+			|	|	   -----------
+			|	|---->| shellCode |
+			--------->| shellCode |
+					  | ......... |
+					   -----------
+			*/
 		for (i = 0; i < ServiceTableDescriptor->NumberOfServices; ++i)
 		{
 			ServciceAddr = GetSSDTProcAddress(ServiceTableDescriptor->ServiceTableBase, i, &ParamCount);
@@ -276,7 +316,7 @@ extern "C" {
 		PrivateSSDT->ServiceCounterTableBase = NULL;
 
 
-		PMU_DEBUG_INFO_LN_EX("ServiceTable: %p ParamTableBase: %p NumOfService: %x ",
+		PMU_DEBUG_INFO_LN_EX("NumberOfServices: %X ServiceTableBase: %p ParamTableBase: %p ",
 			PrivateSSDT->NumberOfServices,
 			PrivateSSDT->ServiceTableBase,
 			PrivateSSDT->ParamTableBase
@@ -366,6 +406,17 @@ extern "C" {
 		UCHAR FixCode[6] = { 0xFF , 0x25 , 0x00 , 0x00 , 0x00 , 0x00 };
 		UCHAR Signature[6] = { 0x89 , 0x83, 0xF8 , 0x01 , 0x00 ,0x00 };
 		BOOLEAN  IsHooked = FALSE;
+
+		if (PsGetCurrentProcessId() == (HANDLE)12012)
+		{
+			if (pTrapFrame->Rax == 51) 
+			{
+				g_Syscall51Count++;
+				PMU_DEBUG_INFO_LN_EX("test flags pro: %d rip: %p rax: %d g_Syscall51Count: %d ", KeGetCurrentProcessorNumber() ,pTrapFrame->Rip, pTrapFrame->Rax, g_Syscall51Count);
+			}
+		}
+
+
 		for (int k = 0; k < 6; k++)
 		{
 			if (((PUCHAR)pTrapFrame->Rip)[k] != Signature[k])
@@ -374,7 +425,7 @@ extern "C" {
 			}
 		}
 		  
-		for (int k = 0; k < sizeof(g_HookIndex) ; k++)
+		for (int k = 0; k < sizeof(g_HookIndex) / 4; k++)
 		{
 			if (pTrapFrame->Rax == g_HookIndex[k])
 			{
@@ -386,7 +437,7 @@ extern "C" {
 		{
 			return; 
 		}
-
+		 
 		if (!g_ShellCode)
 		{
 			return;
@@ -400,16 +451,17 @@ extern "C" {
 
 		RtlZeroMemory(g_ShellCode, PAGE_SIZE);
 
-		ULONG64 RetAddr = pTrapFrame->Rip + 33;
-		RtlMoveMemory(g_ShellCode, (PUCHAR)pTrapFrame->Rip, 33);
-		RtlCopyMemory(g_ShellCode + 33, FixCode, 6);
-		RtlCopyMemory(g_ShellCode + 39, &RetAddr, 8);
+		ULONG64 RetAddr = pTrapFrame->Rip + 40;
+		RtlMoveMemory(g_ShellCode, (PUCHAR)pTrapFrame->Rip, 40);
+		RtlCopyMemory(g_ShellCode + 40, FixCode, 6);
+		RtlCopyMemory(g_ShellCode + 46, &RetAddr, 8);
 
-		for (int i = 0; i < 33; i++)
+		for (int i = 0; i < 40; i++)
 		{
-			SYSTEM_SERVICE_TABLE* Ssdt = NULL;
+		
 			if (g_ShellCode[i] == 0x4C && g_ShellCode[i + 1] == 0x8D && g_ShellCode[i + 2] == 0x15)
-			{
+			{	
+				SYSTEM_SERVICE_TABLE* Ssdt = NULL;
 				if (!g_OrgSsdt)
 				{
 					g_OrgSsdt = *(PULONG)&g_ShellCode[i + 3];
@@ -422,13 +474,14 @@ extern "C" {
 
 				if (!g_PrivateSsdtTable)
 				{
+ 
 					g_PrivateSsdtTable = (PUCHAR)ExAllocatePoolWithTag(NonPagedPool, (Ssdt->NumberOfServices * sizeof(JMPCODE)) + (Ssdt->NumberOfServices * sizeof(ULONG)), 'PSSD');
 					g_JmpCodeTable = (JMPCODE*)(g_PrivateSsdtTable + (Ssdt->NumberOfServices * sizeof(ULONG)));
 					if (g_PrivateSsdtTable)
 					{
 						RtlZeroMemory((void *)g_PrivateSsdtTable, (Ssdt->NumberOfServices * sizeof(JMPCODE)) + (Ssdt->NumberOfServices * sizeof(ULONG)));
 
-						BuildPrivateSyscallTable(Ssdt, (PULONG)g_PrivateSsdtTable, g_MyServiceParamTable, g_MyServiceTableDescriptor, (JMPCODE*)g_JmpCodeTable);
+						BuildPrivateSyscallTable(Ssdt, (PULONG)g_PrivateSsdtTable, g_MyServiceParamTable, g_MyServiceTableDescriptor, (JMPCODE*)g_JmpCodeTable); 
 					}
 					else
 					{
@@ -456,10 +509,54 @@ extern "C" {
 				SetSyscallProc(51, (ULONG64)MyNtQuerySystemInformation, (PVOID*)&g_MyNtQuerySystemInformation);
 				SetSyscallProc(82, (ULONG64)MyNtCreateFile, (PVOID*)&g_MyNtCreateFile);
 				SetSyscallProc(32, (ULONG64)MyNtQueryVirtualMemory, (PVOID*)&g_MyNtQueryVirtualMemory);
-
-				pTrapFrame->Rip = (ULONG64)g_ShellCode;
-
+				///pTrapFrame->Rip = (ULONG64)g_ShellCode;
 			}
+			
+			if (g_ShellCode[i] == 0x4C && g_ShellCode[i + 1] == 0x8D && g_ShellCode[i + 2] == 0x1D)
+			{
+				SYSTEM_SERVICE_TABLE* SSsdt = NULL;
+				if (!g_OrgSSsdt)
+				{
+					g_OrgSSsdt = *(PULONG)&g_ShellCode[i + 3];
+					g_OrgSSsdt = (g_OrgSSsdt + pTrapFrame->Rip + i + 7);
+				} 
+
+				SSsdt = ((SYSTEM_SERVICE_TABLE*)g_OrgSSsdt)+1;
+
+				PMU_DEBUG_INFO_LN_EX("Shadow NumberOfServices: %I64x Base: %I64x ", SSsdt->NumberOfServices, SSsdt->ServiceTableBase);
+
+				if (!g_PrivateSSsdtTable)
+				{
+
+					g_PrivateSSsdtTable = (PUCHAR)ExAllocatePoolWithTag(NonPagedPool, (SSsdt->NumberOfServices * sizeof(JMPCODE)) + (SSsdt->NumberOfServices * sizeof(ULONG)), 'PSSD');
+					g_ShadowJmpCodeTable = (JMPCODE*)(g_PrivateSSsdtTable + (SSsdt->NumberOfServices * sizeof(ULONG)));
+					if (g_PrivateSSsdtTable)
+					{
+						RtlZeroMemory((void *)g_PrivateSSsdtTable, (SSsdt->NumberOfServices * sizeof(JMPCODE)) + (SSsdt->NumberOfServices * sizeof(ULONG)));
+
+						BuildPrivateSyscallTable(SSsdt, (PULONG)g_PrivateSSsdtTable, g_MyShadowServiceParamTable, &g_MyShadowServiceTableDescriptor->Win32k, (JMPCODE*)g_ShadowJmpCodeTable);
+					}
+					else
+					{
+						PMU_DEBUG_INFO_LN_EX("Break;;;;;;");
+						break;
+					} 
+				}	
+				
+				memcpy(&g_MyShadowServiceTableDescriptor->NtKernel ,  g_MyServiceTableDescriptor , sizeof(SYSTEM_SERVICE_TABLE));
+
+				MyOffset = (ULONG)(((ULONG64)g_MyShadowServiceTableDescriptor & 0xFFFFFFFF) - ((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF) - 7);
+				PMU_DEBUG_INFO_LN_EX("[Calc2]g_MyShadowServiceTableDescriptor: %p g_ShellCode: %p Result: %x ", &g_MyShadowServiceTableDescriptor->Win32k, &g_ShellCode[i], MyOffset);
+				PMU_DEBUG_INFO_LN_EX("[Calc2]Verification Result: %p ", (ULONG)(((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF) + MyOffset + 7));
+				*(PULONG)&g_ShellCode[i + 3] = MyOffset;
+
+				SYSTEM_SERVICE_TABLE* MySSsdt = (SYSTEM_SERVICE_TABLE*)(((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF00000000) + ((ULONG)(((ULONG64)&g_ShellCode[i] & 0xFFFFFFFF) + MyOffset + 7)));
+				PMU_DEBUG_INFO_LN_EX("[FakeCallTable]SyscallTest:  %p g_MyShadowServiceTableDescriptor: %p", MySSsdt, &g_MyShadowServiceTableDescriptor->Win32k);
+				PMU_DEBUG_INFO_LN_EX("[FakeCallTable]Num: %x Base: %p CountBase: %p", MySSsdt->NumberOfServices, MySSsdt->ServiceTableBase, MySSsdt->ParamTableBase);
+				PMU_DEBUG_INFO_LN_EX("g_ShellCode: %X ", g_ShellCode);
+				pTrapFrame->Rip = (ULONG64)g_ShellCode;
+			}
+
 		}
 	}
 
@@ -486,6 +583,12 @@ extern "C" {
 			return STATUS_UNSUCCESSFUL;
 		}
 
+		g_MyShadowServiceTableDescriptor = (TKeShadowTable*)ExAllocatePoolWithTag(NonPagedPool, PAGE_SIZE, 'stdt');
+		if (!g_MyShadowServiceTableDescriptor)
+		{
+			return STATUS_UNSUCCESSFUL;
+		}
+		RtlZeroMemory(g_MyShadowServiceTableDescriptor, PAGE_SIZE);
 		RtlZeroMemory(g_MyServiceTableDescriptor, PAGE_SIZE);
 		RtlZeroMemory(g_FakeSsdt, PAGE_SIZE * 20); 
 		RtlZeroMemory(g_ShellCode, PAGE_SIZE); 
