@@ -150,6 +150,7 @@
     <ClCompile Include="Driver.cpp" />
     <ClCompile Include="PMI.cpp" />
     <ClCompile Include="PMU.cpp" />
+    <ClCompile Include="SSDT.cpp" />
     <ClCompile Include="Util.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -158,6 +159,7 @@
     <ClInclude Include="Log.h" />
     <ClInclude Include="PMI.h" />
     <ClInclude Include="PMU.h" />
+    <ClInclude Include="SSDT.h" />
     <ClInclude Include="Util.h" />
     <ClInclude Include="x86.h" />
   </ItemGroup>
