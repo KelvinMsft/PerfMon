@@ -431,28 +431,44 @@ extern "C" {
 			}
 		} 
 
-		for (int i = 0; i < sizeof(g_HookIndex) / sizeof(ULONG); i++)
-		{
-			if (g_HookIndex[i] == pTrapFrame->Rax)
-			{
-				IsHooked = TRUE;
-			}
-		}
-		 
-
-
 		if (g_PrivateSsdtTable)
-		{ 
+		{
+			ULONG   ServiceNum = 0; 
+			ULONG64 kThread = (ULONG64)KeGetCurrentThread(); 
+
 			/*
 			.text:000000014006EA90 FB                                      sti
 			.text:000000014006EA91 48 89 8B E0 01 00 00                    mov     [rbx+1E0h], rcx
 			.text:000000014006EA98 89 83 F8 01 00 00                       mov     [rbx+1F8h], eax 
 			*/
-			if (!bIsDanger && IsHooked)
+			if (!bIsDanger)
 			{
-				pTrapFrame->Rip = (ULONG64)g_ShellCode;
+				for (int i = 0; i < sizeof(g_HookIndex) / sizeof(ULONG); i++)
+				{
+					if (g_HookIndex[i] == pTrapFrame->Rax)
+					{ 
+						pTrapFrame->Rip = (ULONG64)g_ShellCode;
+						break;
+					}
+				} 
 				return;
 			}
+
+			if (!kThread)
+			{
+				return;
+			}
+
+			ServiceNum = *(PULONG)(kThread + 0x1F8);
+
+			for (int i = 0; i < sizeof(g_HookIndex) / sizeof(ULONG); i++)
+			{
+				if (g_HookIndex[i] == ServiceNum)
+				{
+					IsHooked = TRUE;
+				}
+			}
+
 			/* 
 			.text:000000014006EA9E
 			.text:000000014006EA9E                         loc_14006EA9E:                          ; DATA XREF: sub_14006E900+5A¡üo
@@ -466,8 +482,7 @@ extern "C" {
 			.text:000000014006EAB2                         loc_14006EAB2:                          ; CODE XREF: sub_14006E980+47B¡ýj
 			.text:000000014006EAB2 4C 8D 15 47 DE 23 00                    lea     r10, qword_1402AC900
 			.text:000000014006EAB9 4C 8D 1D 00 DF 23 00                    lea     r11, byte_1402AC9C0
-			*/
-
+			*/ 
 			if (pTrapFrame->Rip >= g_TargetAddress - 20 && pTrapFrame->Rip < g_TargetAddress && IsHooked)
 			{	
 				PMU_DEBUG_INFO_LN_EX("@@@Smaller Case: %p", pTrapFrame->Rip);
@@ -475,7 +490,7 @@ extern "C" {
 				return;
 			}
 			/*
-			.text:000000014006EAB2 4C 8D 15 47 DE 23 00                          lea     r10, qword_1402AC900
+			.text:000000014006EAB2 4C 8D 15 47 DE 23 00                          lea     r10, qword_1402AC900		<< g_TargetAddress
 			.text:000000014006EAB9 4C 8D 1D 00 DF 23 00                          lea     r11, byte_1402AC9C0
 			.text:000000014006EAC0 F7 83 00 01 00 00 80 00 00 00                 test    dword ptr [rbx+100h], 80h
 			.text:000000014006EACA 4D 0F 45 D3                                   cmovnz  r10, r11
@@ -483,12 +498,8 @@ extern "C" {
 			.text:000000014006EAD3 0F 83 E9 02 00 00                             jnb     loc_14006EDC2
 			.text:000000014006EAD9 4E 8B 14 17                                   mov     r10, [rdi+r10]
 			.text:000000014006EADD 4D 63 1C 82                                   movsxd  r11, dword ptr [r10+rax*4]
-			.text:000000014006EAE1 49 8B C3                                      mov     rax, r11						<< + 47
-			.text:000000014006EAE4 49 C1 FB 04                                   sar     r11, 4
-			.text:000000014006EAE8 4D 03 D3                                      add     r10, r11
-			.text:000000014006EAEB 83 FF 20                                      cmp     edi, 20h
-			.text:000000014006EAEE 75 50                                         jnz     short loc_14006EB40
-			.text:000000014006EAF0 4C 8B 9B B8 00 00 00                          mov     r11, [rbx+0B8h]
+			.text:000000014006EAE1 49 8B C3                                      mov     rax, r11					<< + 47
+			.text:000000014006EAE4 49 C1 FB 04                                   sar     r11, 4 
 			*/
 			else if ( pTrapFrame->Rip >= g_TargetAddress &&  pTrapFrame->Rip <= g_TargetAddress + 47 && IsHooked)
 			{
@@ -497,18 +508,18 @@ extern "C" {
 				
 				return;
 			} 
-			/*
-			.text:000000014006EAE8 4D 03 D3                                      add     r10, r11
+			/* May miss it.
+			.text:000000014006EAE8 4D 03 D3                                      add     r10, r11					<< + 54
 			.text:000000014006EAEB 83 FF 20                                      cmp     edi, 20h
 			.text:000000014006EAEE 75 50                                         jnz     short loc_14006EB40
-			.text:000000014006EAF0 4C 8B 9B B8 00 00 00                          mov     r11, [rbx+0B8h]
+			.text:000000014006EAF0 4C 8B 9B B8 00 00 00                          mov     r11, [rbx+0B8h]			<< + 62
 			*/
-			else if (pTrapFrame->Rip >= g_TargetAddress + 50 && pTrapFrame->Rip <= g_TargetAddress + 63 && IsHooked)
+			else if (pTrapFrame->Rip >= g_TargetAddress + 54 && pTrapFrame->Rip <= g_TargetAddress + 62 && IsHooked)
 			{
 				PMU_DEBUG_INFO_LN_EX("@@@Second Middle Case: %p", pTrapFrame->Rip);  
 				return;
 			}
-			/* 
+			/*	.......
 				.text:000000014006EB40 83 E0 0F                                      and     eax, 0Fh
 				.text:000000014006EB43 0F 84 B7 00 00 00                             jz      loc_14006EC00
 				.text:000000014006EB49 C1 E0 03                                      shl     eax, 3
@@ -527,21 +538,16 @@ extern "C" {
 				.text:000000014006EB87 4C 2B D8                                      sub     r11, rax
 				.text:000000014006EB8A 41 FF E3                                      jmp     r11 
 			*/
-			else if (pTrapFrame->Rip >= g_TargetAddress + 142 && pTrapFrame->Rip <= g_TargetAddress + 216)
+			else if (pTrapFrame->Rip >= g_TargetAddress + 142 && pTrapFrame->Rip <= g_TargetAddress + 216 && IsHooked)
 			{
-				ULONG64 ProcAddr = 0;
-				ULONG   ServiceNum = 0;
-				ULONG64 kThread = (ULONG64)KeGetCurrentThread();
-				if (!kThread)
-					return; 
-
-				ServiceNum = *(PULONG)(kThread + 0x1F8);
+				ULONG64 ProcAddr = 0; 
 				ProcAddr = (ULONG64)GetSSDTProcAddress(g_MyServiceTableDescriptor->ServiceTableBase, ServiceNum, NULL);
 				for (int i = 0; i < sizeof(g_HookIndex) / sizeof(ULONG); i++)
 				{
 					if (g_HookIndex[i] == ServiceNum)
 					{
 						PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? Rip: %p ProcAddr: %p Num: %x ", pTrapFrame->Rip, ProcAddr, ServiceNum);
+						break;
 					}
 				} 
 				return;
