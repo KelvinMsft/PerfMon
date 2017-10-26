@@ -425,20 +425,16 @@ extern "C" {
 			{
 				bIsDanger = TRUE ;
 			}
-		}
-		  
-		for (int k = 0; k < sizeof(g_HookIndex) / 4; k++)
+		} 
+
+		for (int i = 0; i < sizeof(g_HookIndex) / sizeof(ULONG); i++)
 		{
-			if (pTrapFrame->Rax == g_HookIndex[k])
+			if (g_HookIndex[i] == pTrapFrame->Rax)
 			{
 				IsHooked = TRUE;
 			}
 		}
-
-		if (!IsHooked)
-		{
-			return; 
-		}
+		 
 		 
 		if (!g_ShellCode)
 		{
@@ -454,20 +450,43 @@ extern "C" {
 			.text:000000014006EACA 4D 0F 45 D3                                   cmovnz  r10, r11
 			.text:000000014006EACE 42 3B 44 17 10                                cmp     eax, [rdi+r10+10h]
 			*/
-			if (bIsDanger && pTrapFrame->Rip >= g_TargetAddress &&  pTrapFrame->Rip <= g_TargetAddress + 47)
+			if (!bIsDanger && IsHooked)
 			{
-				
+				pTrapFrame->Rip = (ULONG64)g_ShellCode;
+				return;
+			}
+
+			if ( pTrapFrame->Rip >= g_TargetAddress &&  pTrapFrame->Rip <= g_TargetAddress + 47 && IsHooked)
+			{ 
 				pTrapFrame->Rip = (ULONG64)g_ShellCode + 26;
 				return;
 			} 
-			else if (bIsDanger && pTrapFrame->Rip > g_TargetAddress + 45)
+			else if (pTrapFrame->Rip > g_TargetAddress + 142 && pTrapFrame->Rip <= g_TargetAddress + 216)
 			{
-				PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? %p", pTrapFrame->Rip);
+				ULONG64 ProcAddr = 0;
+				ULONG   ServiceNum = 0;
+				ULONG64 kThread = (ULONG64)KeGetCurrentThread();
+				if (!kThread)
+					return; 
+
+				ServiceNum = *(PULONG)(kThread + 0x1F8);
+				
+				for (int i = 0; i < sizeof(g_HookIndex) / sizeof(ULONG); i++)
+				{
+					if (g_HookIndex[i] == ServiceNum)
+					{
+						PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? %p", pTrapFrame->Rip, );
+					}
+				}
 				return;
+			}  
+			else if (pTrapFrame->Rip >= g_TargetAddress - 20 && pTrapFrame->Rip < g_TargetAddress && IsHooked)
+			{
+				pTrapFrame->Rip = (ULONG64)g_ShellCode;
 			}
 			else
 			{
-				pTrapFrame->Rip = (ULONG64)g_ShellCode;
+				PMU_DEBUG_INFO_LN_EX("@@Uncover Area %p", pTrapFrame->Rip);
 			}
 
 			return;
@@ -531,8 +550,8 @@ extern "C" {
 				PMU_DEBUG_INFO_LN_EX("g_ShellCode: %X ", g_ShellCode);
 
 				SetSyscallProc(51, (ULONG64)MyNtQuerySystemInformation, (PVOID*)&g_MyNtQuerySystemInformation);
-				SetSyscallProc(82, (ULONG64)MyNtCreateFile, (PVOID*)&g_MyNtCreateFile);
-				SetSyscallProc(32, (ULONG64)MyNtQueryVirtualMemory, (PVOID*)&g_MyNtQueryVirtualMemory);
+				//SetSyscallProc(82, (ULONG64)MyNtCreateFile, (PVOID*)&g_MyNtCreateFile);
+				//SetSyscallProc(32, (ULONG64)MyNtQueryVirtualMemory, (PVOID*)&g_MyNtQueryVirtualMemory);
 				///pTrapFrame->Rip = (ULONG64)g_ShellCode;
 			}
 			
