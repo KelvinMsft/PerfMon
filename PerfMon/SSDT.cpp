@@ -123,7 +123,7 @@ extern "C" {
 	BOOLEAN						g_IsInit = FALSE;
 
 	ULONG64						g_TargetAddress = NULL;
-	ULONG						g_HookIndex[] = { NtQueryVirtualMemServiceNumber , NtQuerySysInfoServiceNumber , NtCreateFileServiceNumber };
+	ULONG						g_HookIndex[] = { NtQuerySysInfoServiceNumber };//NtQueryVirtualMemServiceNumber};//, NtQuerySysInfoServiceNumber ,// NtCreateFileServiceNumber };
  
 //--------------------------------------------------------------//
 	NTSTATUS SetSyscallProc(ULONG Index, ULONG64 NewAddr, PVOID* OldAddr)
@@ -419,9 +419,9 @@ extern "C" {
 			ULONG64 kThread = (ULONG64)KeGetCurrentThread(); 
 
 			/*
-			.text:000000014006EA90 FB                                      sti
-			.text:000000014006EA91 48 89 8B E0 01 00 00                    mov     [rbx+1E0h], rcx
-			.text:000000014006EA98 89 83 F8 01 00 00                       mov     [rbx+1F8h], eax 
+				.text:000000014006EA90 FB                                      sti
+				.text:000000014006EA91 48 89 8B E0 01 00 00                    mov     [rbx+1E0h], rcx
+				.text:000000014006EA98 89 83 F8 01 00 00                       mov     [rbx+1F8h], eax 
 			*/
 			if (!bIsDanger)
 			{
@@ -429,7 +429,8 @@ extern "C" {
 				{
 					if (g_HookIndex[i] == pTrapFrame->Rax)
 					{ 
-						pTrapFrame->Rip = (ULONG64)g_ShellCode;
+						pTrapFrame->Rip = (ULONG64)g_ShellCode;	
+						PMU_DEBUG_INFO_LN_EX("@@@PID: %d Normal Case: %p", PsGetCurrentProcessId(), pTrapFrame->Rip);
 						break;
 					}
 				} 
@@ -451,6 +452,11 @@ extern "C" {
 				}
 			}
 
+			if (!IsHooked)
+			{
+				return; 
+			}
+
 			/* 
 				.text:000000014006EA9E
 				.text:000000014006EA9E                         loc_14006EA9E:                          ; DATA XREF: sub_14006E900+5A¡üo
@@ -465,9 +471,9 @@ extern "C" {
 				.text:000000014006EAB2 4C 8D 15 47 DE 23 00                    lea     r10, qword_1402AC900
 				.text:000000014006EAB9 4C 8D 1D 00 DF 23 00                    lea     r11, byte_1402AC9C0
 			*/ 
-			if (pTrapFrame->Rip >= g_TargetAddress - 20 && pTrapFrame->Rip < g_TargetAddress && IsHooked)
+			if (pTrapFrame->Rip >= g_TargetAddress - 20 && pTrapFrame->Rip < g_TargetAddress )
 			{	
-				PMU_DEBUG_INFO_LN_EX("@@@Smaller Case: %p", pTrapFrame->Rip);
+				PMU_DEBUG_INFO_LN_EX("@@@PID: %d Smaller Case: %p", PsGetCurrentProcessId(), pTrapFrame->Rip);
 				pTrapFrame->Rip = (ULONG64)g_ShellCode;			
 				return;
 			}
@@ -482,9 +488,9 @@ extern "C" {
 				.text:000000014006EADD 4D 63 1C 82                                   movsxd  r11, dword ptr [r10+rax*4]
 				.text:000000014006EAE1 49 8B C3                                      mov     rax, r11					<< + 47
 			*/
-			else if ( pTrapFrame->Rip >= g_TargetAddress &&  pTrapFrame->Rip <= g_TargetAddress + 47 && IsHooked)
+			else if ( pTrapFrame->Rip >= g_TargetAddress &&  pTrapFrame->Rip <= g_TargetAddress + 47 )
 			{
-				PMU_DEBUG_INFO_LN_EX("@@@Middle Case: %p", pTrapFrame->Rip);
+				PMU_DEBUG_INFO_LN_EX("@@@PID: %d Middle Case: %p", PsGetCurrentProcessId(), pTrapFrame->Rip);
 				pTrapFrame->Rip = (ULONG64)g_ShellCode + 26;
 				
 				return;
@@ -496,9 +502,9 @@ extern "C" {
 				.text:000000014006EAEE 75 50                                         jnz     short loc_14006EB40
 				.text:000000014006EAF0 4C 8B 9B B8 00 00 00                          mov     r11, [rbx+0B8h]			<< + 62
 			*/
-			else if (pTrapFrame->Rip >= g_TargetAddress + 50 && pTrapFrame->Rip <= g_TargetAddress + 62 && IsHooked)
+			else if (pTrapFrame->Rip >= g_TargetAddress + 50 && pTrapFrame->Rip <= g_TargetAddress + 62 )
 			{
-				PMU_DEBUG_INFO_LN_EX("@@@Second Middle Case: %p", pTrapFrame->Rip);  
+				PMU_DEBUG_INFO_LN_EX("@@@PID: %d Second Middle Case: %p", PsGetCurrentProcessId(),  pTrapFrame->Rip);
 				return;
 			}
 			/*
@@ -520,9 +526,9 @@ extern "C" {
 				.text:000000014006EB31                                               db      66h, 66h, 66h, 66h, 66h, 66h
 				.text:000000014006EB31 66 66 66 66 66 66 66 0F 1F 84+                nop     word ptr [rax+rax+00000000h]
 			*/
-			else if (pTrapFrame->Rip >= g_TargetAddress + 69 && pTrapFrame->Rip <= g_TargetAddress + 127 && IsHooked)
+			else if (pTrapFrame->Rip >= g_TargetAddress + 69 && pTrapFrame->Rip <= g_TargetAddress + 127 )
 			{
-				PMU_DEBUG_INFO_LN_EX("@@@Third Middle Case: %p", pTrapFrame->Rip);
+				PMU_DEBUG_INFO_LN_EX("@@@PID: %d Third Middle Case: %p", PsGetCurrentProcessId(),  pTrapFrame->Rip);
 				return;
 			}
 			/* 
@@ -553,15 +559,16 @@ extern "C" {
 					if (g_HookIndex[i] == ServiceNum)
 					{
 						pTrapFrame->R10 = ProcAddr;
-						PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? Rip: %p ProcAddr: %p Num: %x ", pTrapFrame->Rip, ProcAddr, ServiceNum);
-						break;
+						PMU_DEBUG_INFO_LN_EX("@@@PID: %d We should record down what is going on here ?? Rip: %p ProcAddr: %p Num: %x ", PsGetCurrentProcessId(),  pTrapFrame->Rip, ProcAddr, ServiceNum);
+						return;
 					}
 				} 
+				PMU_DEBUG_INFO_LN_EX("@@@PID: %d Overflowing", PsGetCurrentProcessId() );
 				return;
 			}   
 			else
 			{ 
-				PMU_DEBUG_INFO_LN_EX("@@PID: %X Uncover Area %p Middle Num: %d  TargetAddress: %p  IsHooked: %x", PsGetCurrentProcessId(), pTrapFrame->Rip, ServiceNum,  g_TargetAddress+47 , IsHooked);
+				PMU_DEBUG_INFO_LN_EX("@@@PID: %d Uncover Area %p Middle Num: %d  TargetAddress: %p  IsHooked: %x", PsGetCurrentProcessId(), pTrapFrame->Rip, ServiceNum,  g_TargetAddress+47 , IsHooked);
 			}
 
 			return;
