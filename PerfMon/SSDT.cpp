@@ -485,6 +485,10 @@ extern "C" {
 			.text:000000014006EADD 4D 63 1C 82                                   movsxd  r11, dword ptr [r10+rax*4]
 			.text:000000014006EAE1 49 8B C3                                      mov     rax, r11						<< + 47
 			.text:000000014006EAE4 49 C1 FB 04                                   sar     r11, 4
+			.text:000000014006EAE8 4D 03 D3                                      add     r10, r11
+			.text:000000014006EAEB 83 FF 20                                      cmp     edi, 20h
+			.text:000000014006EAEE 75 50                                         jnz     short loc_14006EB40
+			.text:000000014006EAF0 4C 8B 9B B8 00 00 00                          mov     r11, [rbx+0B8h]
 			*/
 			else if ( pTrapFrame->Rip >= g_TargetAddress &&  pTrapFrame->Rip <= g_TargetAddress + 47 && IsHooked)
 			{
@@ -493,6 +497,17 @@ extern "C" {
 				
 				return;
 			} 
+			/*
+			.text:000000014006EAE8 4D 03 D3                                      add     r10, r11
+			.text:000000014006EAEB 83 FF 20                                      cmp     edi, 20h
+			.text:000000014006EAEE 75 50                                         jnz     short loc_14006EB40
+			.text:000000014006EAF0 4C 8B 9B B8 00 00 00                          mov     r11, [rbx+0B8h]
+			*/
+			else if (pTrapFrame->Rip >= g_TargetAddress + 50 && pTrapFrame->Rip <= g_TargetAddress + 63 && IsHooked)
+			{
+				PMU_DEBUG_INFO_LN_EX("@@@Second Middle Case: %p", pTrapFrame->Rip);  
+				return;
+			}
 			/* 
 				.text:000000014006EB40 83 E0 0F                                      and     eax, 0Fh
 				.text:000000014006EB43 0F 84 B7 00 00 00                             jz      loc_14006EC00
@@ -533,7 +548,7 @@ extern "C" {
 			}   
 			else
 			{ 
-				PMU_DEBUG_INFO_LN_EX("@@PID: %X Uncover Area %p Middle TargetAddress: %p IsHooked: %x", PsGetCurrentProcessId(), pTrapFrame->Rip, g_TargetAddress+47 , IsHooked);
+				PMU_DEBUG_INFO_LN_EX("@@PID: %X Uncover Area %p Middle Num: %d  TargetAddress: %p  IsHooked: %x", PsGetCurrentProcessId(), pTrapFrame->Rip, pTrapFrame->Rax,  g_TargetAddress+47 , IsHooked);
 			}
 
 			return;
