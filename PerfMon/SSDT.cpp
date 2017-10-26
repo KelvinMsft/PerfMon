@@ -470,12 +470,12 @@ extern "C" {
 					return; 
 
 				ServiceNum = *(PULONG)(kThread + 0x1F8);
-				
+				ProcAddr = (ULONG64)GetSSDTProcAddress(g_MyServiceTableDescriptor->ServiceTableBase, ServiceNum, NULL);
 				for (int i = 0; i < sizeof(g_HookIndex) / sizeof(ULONG); i++)
 				{
 					if (g_HookIndex[i] == ServiceNum)
 					{
-						PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? %p", pTrapFrame->Rip, );
+						PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? Rip: %p ProcAddr: %p Num: %x ", pTrapFrame->Rip, ProcAddr, ServiceNum);
 					}
 				}
 				return;
