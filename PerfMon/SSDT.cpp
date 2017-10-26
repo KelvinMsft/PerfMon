@@ -122,7 +122,7 @@ extern "C" {
 	TKeShadowTable*				g_MyShadowServiceTableDescriptor;
 	BOOLEAN						g_IsInit = FALSE;
 
-	
+	ULONG64						g_TargetAddress = NULL;
 	ULONG						g_HookIndex[] = { NtQueryVirtualMemServiceNumber , NtQuerySysInfoServiceNumber , NtCreateFileServiceNumber };
  
 //--------------------------------------------------------------//
@@ -234,6 +234,7 @@ extern "C" {
 		{
 			PMU_DEBUG_INFO_LN_EX("@@@call count : %u Total: %u", g_SyscallQueryCount , g_Syscall51Count);
 			g_SyscallQueryCount = 0;
+			g_Syscall51Count = 0;
 		}
 
 		if (SystemInformationClass == 0x4567)
@@ -406,8 +407,9 @@ extern "C" {
 		UCHAR FixCode[6] = { 0xFF , 0x25 , 0x00 , 0x00 , 0x00 , 0x00 };
 		UCHAR Signature[6] = { 0x89 , 0x83, 0xF8 , 0x01 , 0x00 ,0x00 };
 		BOOLEAN  IsHooked = FALSE;
+		BOOLEAN bIsDanger = FALSE;
 
-		if (PsGetCurrentProcessId() == (HANDLE)12012)
+		if (PsGetCurrentProcessId() == (HANDLE)13720)
 		{
 			if (pTrapFrame->Rax == 51) 
 			{
@@ -421,7 +423,7 @@ extern "C" {
 		{
 			if (((PUCHAR)pTrapFrame->Rip)[k] != Signature[k])
 			{
-				return;
+				bIsDanger = TRUE ;
 			}
 		}
 		  
@@ -445,7 +447,29 @@ extern "C" {
 
 		if (g_PrivateSsdtTable)
 		{ 
-			pTrapFrame->Rip = (ULONG64)g_ShellCode;
+			/*
+			.text:000000014006EAB2 4C 8D 15 47 DE 23 00                          lea     r10, KeServiceDescriptorTable
+			.text:000000014006EAB9 4C 8D 1D 00 DF 23 00                          lea     r11, KeServiceDescriptorTableShadow
+			.text:000000014006EAC0 F7 83 00 01 00 00 80 00 00 00                 test    dword ptr [rbx+100h], 80h
+			.text:000000014006EACA 4D 0F 45 D3                                   cmovnz  r10, r11
+			.text:000000014006EACE 42 3B 44 17 10                                cmp     eax, [rdi+r10+10h]
+			*/
+			if (bIsDanger && pTrapFrame->Rip >= g_TargetAddress &&  pTrapFrame->Rip <= g_TargetAddress + 47)
+			{
+				
+				pTrapFrame->Rip = (ULONG64)g_ShellCode + 26;
+				return;
+			} 
+			else if (bIsDanger && pTrapFrame->Rip > g_TargetAddress + 45)
+			{
+				PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? %p", pTrapFrame->Rip);
+				return;
+			}
+			else
+			{
+				pTrapFrame->Rip = (ULONG64)g_ShellCode;
+			}
+
 			return;
 		}
 
@@ -467,7 +491,7 @@ extern "C" {
 					g_OrgSsdt = *(PULONG)&g_ShellCode[i + 3];
 					g_OrgSsdt = (g_OrgSsdt + pTrapFrame->Rip + i + 7);
 				}
-
+				g_TargetAddress = pTrapFrame->Rip + i;
 				Ssdt = (SYSTEM_SERVICE_TABLE*)g_OrgSsdt;
 
 				PMU_DEBUG_INFO_LN_EX(" NumberOfServices: %I64x Base: %I64x ", Ssdt->NumberOfServices, Ssdt->ServiceTableBase);

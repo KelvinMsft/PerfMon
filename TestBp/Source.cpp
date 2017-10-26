@@ -31,14 +31,13 @@ int main()
 	while (true) 
 	{
 		system("pause");
-		for (int i = 0; i < 10000; i++)
+		for (int i = 0; i < 1000000; i++)
 		{
 			__try
 			{
 			
-				printf("[i: %x] return: %x \r\n", i, pfn(0x4567 , 0, 0, 0));
-				
-			//	DebugBreak();
+				printf("[i: %x] return: %x \r\n", i, pfn(0x4567 , 0, 0, 0)); 
+		 
 			}
 			__except (1)
 			{
