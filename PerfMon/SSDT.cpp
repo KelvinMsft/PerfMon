@@ -408,6 +408,11 @@ extern "C" {
 		UCHAR Signature[6] = { 0x89 , 0x83, 0xF8 , 0x01 , 0x00 ,0x00 };
 		BOOLEAN  IsHooked = FALSE;
 		BOOLEAN bIsDanger = FALSE;
+		 
+		if (!g_ShellCode)
+		{
+			return;
+		}
 
 		if (PsGetCurrentProcessId() == (HANDLE)13720)
 		{
@@ -417,7 +422,6 @@ extern "C" {
 				PMU_DEBUG_INFO_LN_EX("test flags pro: %d rip: %p rax: %d g_Syscall51Count: %d ", KeGetCurrentProcessorNumber() ,pTrapFrame->Rip, pTrapFrame->Rax, g_Syscall51Count);
 			}
 		}
-
 
 		for (int k = 0; k < 6; k++)
 		{
@@ -435,11 +439,7 @@ extern "C" {
 			}
 		}
 		 
-		 
-		if (!g_ShellCode)
-		{
-			return;
-		}
+
 
 		if (g_PrivateSsdtTable)
 		{ 
@@ -469,9 +469,9 @@ extern "C" {
 			*/
 
 			if (pTrapFrame->Rip >= g_TargetAddress - 20 && pTrapFrame->Rip < g_TargetAddress && IsHooked)
-			{
-				pTrapFrame->Rip = (ULONG64)g_ShellCode;
-				PMU_DEBUG_INFO_LN_EX("@@@Smaller Case");
+			{	
+				PMU_DEBUG_INFO_LN_EX("@@@Smaller Case: %p", pTrapFrame->Rip);
+				pTrapFrame->Rip = (ULONG64)g_ShellCode;			
 				return;
 			}
 			/*
@@ -487,8 +487,10 @@ extern "C" {
 			.text:000000014006EAE4 49 C1 FB 04                                   sar     r11, 4
 			*/
 			else if ( pTrapFrame->Rip >= g_TargetAddress &&  pTrapFrame->Rip <= g_TargetAddress + 47 && IsHooked)
-			{ 
+			{
+				PMU_DEBUG_INFO_LN_EX("@@@Middle Case: %p", pTrapFrame->Rip);
 				pTrapFrame->Rip = (ULONG64)g_ShellCode + 26;
+				
 				return;
 			} 
 			/* 
@@ -526,14 +528,12 @@ extern "C" {
 					{
 						PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? Rip: %p ProcAddr: %p Num: %x ", pTrapFrame->Rip, ProcAddr, ServiceNum);
 					}
-				}
-				PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? Rip: %p ProcAddr: %p Num: %x ", pTrapFrame->Rip, ProcAddr, ServiceNum);
+				} 
 				return;
-			}  
-		 
+			}   
 			else
-			{
-				PMU_DEBUG_INFO_LN_EX("@@Uncover Area %p", pTrapFrame->Rip);
+			{ 
+				PMU_DEBUG_INFO_LN_EX("@@PID: %X Uncover Area %p Middle TargetAddress: %p IsHooked: %x", PsGetCurrentProcessId(), pTrapFrame->Rip, g_TargetAddress+47 , IsHooked);
 			}
 
 			return;
