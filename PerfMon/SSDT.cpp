@@ -384,27 +384,9 @@ extern "C" {
 	//-------------------------------------------------------------------------------------------------------------
 	VOID SyscallHandler(PKTRAP_FRAME pTrapFrame)
 	{		
-		/*
-		*
-			.text:000000014006EA90 FB                                      sti
-			.text:000000014006EA91 48 89 8B E0 01 00 00                    mov     [rbx+1E0h], rcx
-			.text:000000014006EA98 89 83 F8 01 00 00                       mov     [rbx+1F8h], eax				<<<< Interrupt here
-			.text:000000014006EA9E
-			.text:000000014006EA9E                         KiSystemServiceStart:                   ; DATA XREF: KiServiceInternal+5A¡üo
-			.text:000000014006EA9E                                                                 ; .data:00000001401EA838¡ýo
-			.text:000000014006EA9E 48 89 A3 D8 01 00 00                    mov     [rbx+1D8h], rsp
-			.text:000000014006EAA5 8B F8                                   mov     edi, eax
-			.text:000000014006EAA7 C1 EF 07                                shr     edi, 7
-			.text:000000014006EAAA 83 E7 20                                and     edi, 20h
-			.text:000000014006EAAD 25 FF 0F 00 00                          and     eax, 0FFFh
-			.text:000000014006EAB2
-			.text:000000014006EAB2                         KiSystemServiceRepeat:                  ; CODE XREF: KiSystemCall64+47B¡ýj
-			.text:000000014006EAB2 4C 8D 15 47 DE 23 00                    lea     r10, KeServiceDescriptorTable
-			.text:000000014006EAB9 4C 8D 1D 00 DF 23 00                    lea     r11, KeServiceDescriptorTableShadow
-			.text:000000014006EAC0 F7 83 00 01 00 00 80 00+                test    dword ptr [rbx+100h], 80h	<<<< after interrupt
-		*/ 
+
 		ULONG MyOffset = 0;
-		UCHAR FixCode[6] = { 0xFF , 0x25 , 0x00 , 0x00 , 0x00 , 0x00 };
+		UCHAR FixCode[6]   = { 0xFF , 0x25 , 0x00 , 0x00 , 0x00 , 0x00 };
 		UCHAR Signature[6] = { 0x89 , 0x83, 0xF8 , 0x01 , 0x00 ,0x00 };
 		BOOLEAN  IsHooked = FALSE;
 		BOOLEAN bIsDanger = FALSE;
@@ -546,6 +528,7 @@ extern "C" {
 				{
 					if (g_HookIndex[i] == ServiceNum)
 					{
+						pTrapFrame->R10 = ProcAddr;
 						PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? Rip: %p ProcAddr: %p Num: %x ", pTrapFrame->Rip, ProcAddr, ServiceNum);
 						break;
 					}
