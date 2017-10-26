@@ -444,24 +444,73 @@ extern "C" {
 		if (g_PrivateSsdtTable)
 		{ 
 			/*
-			.text:000000014006EAB2 4C 8D 15 47 DE 23 00                          lea     r10, KeServiceDescriptorTable
-			.text:000000014006EAB9 4C 8D 1D 00 DF 23 00                          lea     r11, KeServiceDescriptorTableShadow
-			.text:000000014006EAC0 F7 83 00 01 00 00 80 00 00 00                 test    dword ptr [rbx+100h], 80h
-			.text:000000014006EACA 4D 0F 45 D3                                   cmovnz  r10, r11
-			.text:000000014006EACE 42 3B 44 17 10                                cmp     eax, [rdi+r10+10h]
+			.text:000000014006EA90 FB                                      sti
+			.text:000000014006EA91 48 89 8B E0 01 00 00                    mov     [rbx+1E0h], rcx
+			.text:000000014006EA98 89 83 F8 01 00 00                       mov     [rbx+1F8h], eax 
 			*/
 			if (!bIsDanger && IsHooked)
 			{
 				pTrapFrame->Rip = (ULONG64)g_ShellCode;
 				return;
 			}
+			/* 
+			.text:000000014006EA9E
+			.text:000000014006EA9E                         loc_14006EA9E:                          ; DATA XREF: sub_14006E900+5A¡üo
+			.text:000000014006EA9E                                                                 ; .data:00000001401EA838¡ýo
+			.text:000000014006EA9E 48 89 A3 D8 01 00 00                    mov     [rbx+1D8h], rsp
+			.text:000000014006EAA5 8B F8                                   mov     edi, eax
+			.text:000000014006EAA7 C1 EF 07                                shr     edi, 7
+			.text:000000014006EAAA 83 E7 20                                and     edi, 20h
+			.text:000000014006EAAD 25 FF 0F 00 00                          and     eax, 0FFFh
+			.text:000000014006EAB2
+			.text:000000014006EAB2                         loc_14006EAB2:                          ; CODE XREF: sub_14006E980+47B¡ýj
+			.text:000000014006EAB2 4C 8D 15 47 DE 23 00                    lea     r10, qword_1402AC900
+			.text:000000014006EAB9 4C 8D 1D 00 DF 23 00                    lea     r11, byte_1402AC9C0
+			*/
 
-			if ( pTrapFrame->Rip >= g_TargetAddress &&  pTrapFrame->Rip <= g_TargetAddress + 47 && IsHooked)
+			if (pTrapFrame->Rip >= g_TargetAddress - 20 && pTrapFrame->Rip < g_TargetAddress && IsHooked)
+			{
+				pTrapFrame->Rip = (ULONG64)g_ShellCode;
+				PMU_DEBUG_INFO_LN_EX("@@@Smaller Case");
+				return;
+			}
+			/*
+			.text:000000014006EAB2 4C 8D 15 47 DE 23 00                          lea     r10, qword_1402AC900
+			.text:000000014006EAB9 4C 8D 1D 00 DF 23 00                          lea     r11, byte_1402AC9C0
+			.text:000000014006EAC0 F7 83 00 01 00 00 80 00 00 00                 test    dword ptr [rbx+100h], 80h
+			.text:000000014006EACA 4D 0F 45 D3                                   cmovnz  r10, r11
+			.text:000000014006EACE 42 3B 44 17 10                                cmp     eax, [rdi+r10+10h]
+			.text:000000014006EAD3 0F 83 E9 02 00 00                             jnb     loc_14006EDC2
+			.text:000000014006EAD9 4E 8B 14 17                                   mov     r10, [rdi+r10]
+			.text:000000014006EADD 4D 63 1C 82                                   movsxd  r11, dword ptr [r10+rax*4]
+			.text:000000014006EAE1 49 8B C3                                      mov     rax, r11						<< + 47
+			.text:000000014006EAE4 49 C1 FB 04                                   sar     r11, 4
+			*/
+			else if ( pTrapFrame->Rip >= g_TargetAddress &&  pTrapFrame->Rip <= g_TargetAddress + 47 && IsHooked)
 			{ 
 				pTrapFrame->Rip = (ULONG64)g_ShellCode + 26;
 				return;
 			} 
-			else if (pTrapFrame->Rip > g_TargetAddress + 142 && pTrapFrame->Rip <= g_TargetAddress + 216)
+			/* 
+				.text:000000014006EB40 83 E0 0F                                      and     eax, 0Fh
+				.text:000000014006EB43 0F 84 B7 00 00 00                             jz      loc_14006EC00
+				.text:000000014006EB49 C1 E0 03                                      shl     eax, 3
+				.text:000000014006EB4C 48 8D 64 24 90                                lea     rsp, [rsp-70h]
+				.text:000000014006EB51 48 8D 7C 24 18                                lea     rdi, [rsp+70h+var_58]
+				.text:000000014006EB56 48 8B B5 00 01 00 00                          mov     rsi, [rbp+100h]
+				.text:000000014006EB5D 48 8D 76 20                                   lea     rsi, [rsi+20h]
+				.text:000000014006EB61 F6 85 F0 00 00 00 01                          test    byte ptr [rbp+0F0h], 1
+				.text:000000014006EB68 74 16                                         jz      short loc_14006EB80
+				.text:000000014006EB6A 48 3B 35 8F D4 23 00                          cmp     rsi, cs:MmUserProbeAddress
+				.text:000000014006EB71 48 0F 43 35 87 D4 23 00                       cmovnb  rsi, cs:MmUserProbeAddress
+				.text:000000014006EB79 0F 1F 80 00 00 00 00                          nop     dword ptr [rax+00000000h]
+				.text:000000014006EB80
+				.text:000000014006EB80                               loc_14006EB80:                          ; CODE XREF: sub_14006E980+1E8¡üj
+				.text:000000014006EB80 4C 8D 1D 79 00 00 00                          lea     r11, loc_14006EC00
+				.text:000000014006EB87 4C 2B D8                                      sub     r11, rax
+				.text:000000014006EB8A 41 FF E3                                      jmp     r11 
+			*/
+			else if (pTrapFrame->Rip >= g_TargetAddress + 142 && pTrapFrame->Rip <= g_TargetAddress + 216)
 			{
 				ULONG64 ProcAddr = 0;
 				ULONG   ServiceNum = 0;
@@ -478,12 +527,10 @@ extern "C" {
 						PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? Rip: %p ProcAddr: %p Num: %x ", pTrapFrame->Rip, ProcAddr, ServiceNum);
 					}
 				}
+				PMU_DEBUG_INFO_LN_EX("@@@We should record down what is going on here ?? Rip: %p ProcAddr: %p Num: %x ", pTrapFrame->Rip, ProcAddr, ServiceNum);
 				return;
 			}  
-			else if (pTrapFrame->Rip >= g_TargetAddress - 20 && pTrapFrame->Rip < g_TargetAddress && IsHooked)
-			{
-				pTrapFrame->Rip = (ULONG64)g_ShellCode;
-			}
+		 
 			else
 			{
 				PMU_DEBUG_INFO_LN_EX("@@Uncover Area %p", pTrapFrame->Rip);
